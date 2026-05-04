@@ -30,9 +30,7 @@ def generate_warning(header: str, msg: str):
     window = Tk()
     window.withdraw()
     messagebox.showwarning(header, msg)
-    window.deiconify()
     window.destroy()
-    window.quit()
 
 class PayloadBay(Base):
     """
@@ -42,10 +40,10 @@ class PayloadBay(Base):
 
     The required circular envelope diameter sets te inner fuselage diameter.
     """
-    payload_longitudinal = Input(1.20)
-    payload_lateral = Input(0.80)
-    payload_vertical = Input(0.80)
-    clearance = Input(0.10)
+    payload_longitudinal = Input(1.20, validator=Positive())
+    payload_lateral = Input(0.80, validator=Positive())
+    payload_vertical = Input(0.80, validator = Positive())
+    clearance = Input(0.10, validator = Positive(incl_zero=True))
 
     @Attribute
     def required_longitudinal(self):
@@ -60,7 +58,7 @@ class PayloadBay(Base):
         return self.payload_vertical + 2 * self.clearance
     @Attribute
     def required_diameter(self):
-        return 1.05* sqrt(self.required_lateral**2 + self.required_vertical**2)
+        return sqrt(self.required_lateral**2 + self.required_vertical**2)
 
     @Attribute
     def required_volume(self):
@@ -69,28 +67,31 @@ class PayloadBay(Base):
 
 class Fuselage(Base):
     """
-    Parametric fuselage for a suborbital research spaceplane.
+    Rule based parametric fuselage for a suborbital research spaceplane.
 
     Designed inside-out (payload first, then structure around it), following
-    the standard conceptual design procedure [Slide 6, Slide 61].
+    the standard conceptual design procedure. Payload envelope drives inner diameter,
+    wall deptth gives outer diameter and fineness ratios set nose and tail lenghts.
+
+    Design is driven by:
+        - Payload requirements
+        - Aerodynamic considerations
+        - Structural considerations
+        - Ground handling
 
     The three-section layout (nose / mid / tail) follows the standard
     top-view decomposition described in [Slide 51, Slide 86].
 
-    Design is driven by:
-        - Payload requirements       [Slide 6, Slide 23]
-        - Aerodynamic considerations [Slide 10-12, Slide 56-58]
-        - Structural considerations  [Slide 13-19, Slide 44-45]
-        - Ground handling            [Slide 20-21, Slide 72]
+
     """
 
-    payload_bay: PayloadBay = Input(PayloadBay())
+    payload_bay =  Input(PayloadBay())
 
-    avionics_bay_length: float = Input(0.40)
-    propulsion_bay_length: float = Input(1.20)
+    avionics_bay_length: float = Input(0.40, validator  = GreaterThan(0))
+    propulsion_bay_length: float = Input(1.20, validator = GreaterThan(0))
 
-    structural_wall_depth: float = Input(0.05) #fighter jets/trainers
-    min_inner_diameter: float = Input(0.50) #to avoid unrealistic narrow bodies
+    structural_wall_depth: float = Input(0.05, validator = Between(0.02, 0.15)) #fighter jets/trainers
+    min_inner_diameter: float = Input(0.40) #to avoid unrealistic narrow bodies
 
     #: Nose fineness ratio: nose_length / outer_diameter
     #: Target >= 1.5 for acceptable transonic/supersonic wave drag
@@ -98,9 +99,9 @@ class Fuselage(Base):
 
     #: Tail fineness ratio: tail_length / outer_diameter [Slide 56]
     #: Larger value -> shallower boattail -> less base drag
-    tail_fineness: float = Input(2.5)
+    tail_fineness: float = Input(3.0)
 
-    upsweep_angle: float = Input(10.0, validator=Between(0, 25))
+    upsweep_angle: float = Input(7.0, validator=Between(2, 9))
 
     @Attribute
     def inner_diameter(self) -> float:
@@ -168,7 +169,7 @@ class Fuselage(Base):
             msg = (
                 f"nose_fineness ({self.nose_fineness:.2f}) < 1.5 — blunt nose will "
                 "have elevated wave drag at transonic speed. "
-                "Recommend nose_fineness >= 1.5. [Slide 57]"
+                "Recommend nose_fineness >= 1.5."
             )
             warnings.warn(msg)
             if self.popup_warnings:
@@ -186,7 +187,7 @@ class Fuselage(Base):
             msg = (
                 f"tail_fineness ({self.tail_fineness:.2f}) < 1.0 — steep boattail "
                 "will cause flow separation and high base drag. "
-                "Recommend tail_fineness >= 1.0. [Slide 56]"
+                "Recommend tail_fineness >= 1.0n"
             )
             warnings.warn(msg)
             if self.popup_warnings:
@@ -203,7 +204,7 @@ class Fuselage(Base):
         if self.upsweep_angle > 15.0:
             msg = (
                 f"upsweep_angle ({self.upsweep_angle:.1f} deg) > 15 deg — "
-                "drag increases significantly. First-loop target is 14 deg. [Slide 72]"
+                "drag increases significantly. First-loop target is 14 deg"
             )
             warnings.warn(msg)
             if self.popup_warnings:
@@ -218,41 +219,22 @@ class Fuselage(Base):
         [Slide 12]
         """
         sr = self.total_length / self.outer_diameter
-        if sr < 10.0:
+        if sr < 20.0:
             msg = (
-                f"Fineness ratio {sr:.2f} < 10 — below the transonic spaceplane "
-                "target (10–20). Pressure drag will be elevated. [Slide 12]"
+                f"Fineness ratio {sr:.2f} < 20 — below the transonic spaceplane "
+                "target (20-25). Pressure drag will be elevated. [Slide 12]"
             )
             warnings.warn(msg)
             if self.popup_warnings:
                 generate_warning("Slenderness ratio warning", msg)
-        elif sr > 20.0:
+        elif sr > 25.0:
             msg = (
-                f"Fineness ratio {sr:.2f} > 20 — structural bending loads will "
+                f"Fineness ratio {sr:.2f} > 25 — structural bending loads will "
                 "be critical. [Slide 12]"
             )
             warnings.warn(msg)
         return sr
 
-    @Attribute
-    def payload_clearance_check(self) -> float:
-        """
-        Warns when the payload envelope occupies more than 90 % of the inner
-        diameter — leaving very little margin for wiring and structural frames.
-        Returns the inner diameter (unchanged). [Slide 30]
-        """
-        ratio = self.payload_bay.required_diameter / self.inner_diameter
-        if ratio > 0.90:
-            msg = (
-                f"Payload envelope ({self.payload_bay.required_diameter:.3f} m) "
-                f"occupies {ratio:.0%} of inner diameter ({self.inner_diameter:.3f} m). "
-                "Very little margin for wiring and frames. "
-                "Increase min_inner_diameter or reduce payload envelope. [Slide 30]"
-            )
-            warnings.warn(msg)
-            if self.popup_warnings:
-                generate_warning("Payload clearance warning", msg)
-        return self.inner_diameter
 
     #: Show a Tk pop-up for critical soft-rule violations?
     popup_warnings: bool = Input(False)
@@ -271,6 +253,10 @@ class Fuselage(Base):
     @Attribute
     def x_tail_start(self) -> float:
         return self.nose_length + self.cylindrical_length
+
+    @Attribute
+    def x_tail_mid(self) -> float:
+        return self.x_tail_start + 0.5 * self.tail_length
 
     @Attribute
     def x_tail_tip(self) -> float:
@@ -344,15 +330,22 @@ class Fuselage(Base):
         )
 
     @Part
+    def outer_tail_mid(self):
+        return FittedCurve(
+            points=self._section_coordinates(self.outer_radius, self.x_tail_mid)
+        )
+
+    @Part
     def outer_tail_tip(self):
         return FittedCurve(
-            points =self._section_coordinates(0.01, self.x_tail_tip)
+            points =self._section_coordinates(self.outer_radius, self.x_tail_tip)
         )
     @Attribute
     def outer_profiles(self):
         return [self.outer_nose_point,
                 self.outer_nose_base,
                 self.outer_tail_start,
+                self.outer_tail_mid,
                 self.outer_tail_tip]
 
     @Part
@@ -363,7 +356,7 @@ class Fuselage(Base):
     @Part
     def inner_nose_start(self):
         return FittedCurve(
-            points =self._section_coordinates(0.01, 0.25 * self.nose_length)
+            points =self._section_coordinates(0.01, 0.05 * self.nose_length)
         )
 
     @Part
@@ -376,16 +369,24 @@ class Fuselage(Base):
         return FittedCurve(
             points =self._section_coordinates(self.inner_radius, self.x_tail_start)
         )
+
+    @Part
+    def inner_tail_mid(self):
+        return FittedCurve(
+            points=self._section_coordinates(self.inner_radius, self.x_tail_mid)
+        )
+
     @Part
     def inner_tail_end(self):
         return FittedCurve(
-            points =self._section_coordinates(0.01, self.x_tail_start + 0.65 * self.tail_length)
+            points =self._section_coordinates(self.inner_radius, self.x_tail_tip)
         )
     @Attribute
     def inner_profiles(self):
         return [self.inner_nose_start,
                 self.inner_nose_base,
                 self.inner_tail_start,
+                self.inner_tail_mid,
                 self.inner_tail_end]
 
     @Part
@@ -429,9 +430,9 @@ if __name__ == "__main__":
 
 
     bay=PayloadBay(
-            payload_longitudinal=1.20,
-            payload_lateral=0.2,
-            payload_vertical=0.2,
+            payload_longitudinal=0.250,
+            payload_lateral=0.250,
+            payload_vertical=0.250,
             clearance=0.10
     )
 
@@ -444,7 +445,7 @@ if __name__ == "__main__":
         min_inner_diameter=0.80,
         nose_fineness=1.8,
         tail_fineness=2.5,
-        upsweep_angle=10.0,
+        upsweep_angle=7.0,
         popup_warnings=False,
     )
 
