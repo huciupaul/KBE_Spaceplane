@@ -1,15 +1,25 @@
-"""Use propellant tank class with outer diameter, cylindricla length, uallage fraction, tank wall thinckness,
-propellant type, required propellant mass, propellant density """
-"""compute tank volume, usable propellant colume, required tank length, 
-total tank mass estimate, whether it fits inside the fuselage"""
+"""
+tanks.py
+
+Propellant tank geometry for the suborbital research spaceplane
+
+PropellantTank: sizes one cylindrical tak given required volume
+    and max diameter
+TankSystem: places oxidiser + fuel tanks sequential in the propulsion bay
+
+Part of Team 24 KBE Assignment
+Authors: Yasmine Mafoutsis, Paul-Ionut Huciu
+"""
 
 from math import pi
-
+import warnings
 from parapy.core import *
 from parapy.core.validate import *
 from parapy.geom import *
 
-from propulsion_system import PropulsionSystem
+from propulsion_system import PropulsionSystem, generate_warning
+
+
 
 
 class PropellantTank(Base):
@@ -20,15 +30,14 @@ class PropellantTank(Base):
     - required_volume: required tank volume [m^3]
     - max_outer_diameter: maximum allowable outer diameter [m]
     - wall_thickness: tank wall thickness [m]
-    - x_start: x-location of the front end of the tank [m]
     """
 
     required_volume = Input(0.5, validator=Positive())
     max_outer_diameter = Input(0.8, validator=Positive())
-    wall_thickness = Input(0.01, validator=Positive())
+    wall_thickness = Input(0.003, validator=Positive())
     x_start = Input(0.0)
-
     color = Input("orange")
+    popup_warnings: bool = Input(False)
 
     @Attribute
     def outer_diameter(self):
@@ -99,17 +108,16 @@ class TankSystem(Base):
     - oxidizer_volume
 
     Sizes:
-    - one oxidizer tank
-    - one fuel tank
-
-    and places them sequentially along the x-axis.
+    - one oxidizer tank: palaced forward closer to cg
+    - one fuel tank: placed behind oxidiser tank
+        * sequentially along the x-axis. *
     """
 
     propulsion_system = Input(PropulsionSystem())
 
     max_tank_diameter = Input(0.8, validator=Positive())
     wall_thickness = Input(0.01, validator=Positive())
-    intertank_spacing = Input(0.15, validator=Positive(incl_zero=True))
+    intertank_spacing = Input(0.10, validator=Positive(incl_zero=True))
     x_start = Input(0.0)
 
     @Attribute
@@ -161,10 +169,10 @@ if __name__ == "__main__":
 
     prop = PropulsionSystem(
         label="Propulsion System",
-        propulsion_type="LOX_METHANE",
+        propulsion_type="N2O_PROPYLENE",
         payload_mass=60.0,
         target_apogee=100e3,
-        thrust_to_weight=1.5,
+        thrust_to_weight=3.5,
         popup_warnings=False,
     )
 
