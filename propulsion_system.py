@@ -148,11 +148,17 @@ class PropellantTank(Base):
         """
         net = self.required_volume - self.cap_volume
         if net < 0:
-            raise ValueError(
-                f"Required volume ({self.required_volume:.4f} m³) is smaller than "
-                f"the hemispherical-cap volume ({self.cap_volume:.4f} m³) at this "
-                f"diameter. Increase the required volume or reduce the tank diameter."
+            msg = (
+                f"Tank diameter too large: cap volume "
+                f"({self.cap_volume * 1e3:.3f} L) exceeds required volume "
+                f"({self.required_volume * 1e3:.3f} L) for outer_diameter="
+                f"{self.outer_diameter * 1e3:.1f} mm. "
+                "Reduce tank_diameter_fraction (try 0.40 or less)."
             )
+            warnings.warn(msg)
+            if self.popup_warnings:
+                generate_warning("Tank diameter too large", msg)
+            return 0.0
         return net / (pi * self.inner_radius ** 2)
 
     @Attribute
