@@ -20,7 +20,7 @@
 #   Z -> up
 # All lengths in metres, masses in kilograms.
 
-from __future__ import annotations
+
 import math
 
 # -- ParaPy core ---------------------------------------------------------------
