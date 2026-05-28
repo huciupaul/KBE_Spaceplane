@@ -56,8 +56,8 @@ PROPELLANT_DB = {
     "N2O_PROPYLENE": dict(
         isp=310.0,
         mixture_ratio=7.2,
-        oxidizer_density=1220.0,  # liquid N2O at ~20 °C [kg/m³]
-        fuel_density=614.0,  # liquid propylene at ~20 °C [kg/m³]
+        oxidizer_density=1220.0,   # liquid N2O at ~20 °C [kg/m³]
+        fuel_density=614.0,        # liquid propylene at ~20 °C [kg/m³]
         self_pressurising=True,
     ),
     # Used in early Mk-II Aurora rocket-powered tests (March 2023)
@@ -99,25 +99,12 @@ class PropellantTank(Base):
     Owned as a @Part by PropulsionSystem – never instantiated standalone.
     """
 
-    required_volume: float = Input(1000.05, validator=Positive())
-    max_outer_diameter: float = Input(0.10, validator=Positive())
-    wall_thickness: float = Input(0.003, validator=Positive())
-    x_start: float = Input(0.0)
-    color: str = Input("orange")
-    popup_warnings: bool = Input(False)
-
-    #: Maximum dynamic pressure [Pa] — drives hoop-stress wall thickness
-    q_max: float = Input(50e3, validator=Positive())
-    #: Allowable hoop stress of tank material [Pa]  (Al-2219-T87)
-    sigma_allow: float = Input(345e6, validator=Positive())
-    #: Material density for tank wall mass [kg/m³]  (Al-2219-T87)
-    rho_wall: float = Input(2840.0, validator=Positive())
-    #: Design factor of safety on burst pressure
-    factor_of_safety: float = Input(1.5, validator=Between(1.0, 3.0))
-    #: Semi-empirical tank mass fraction (AIAA-2004-3791)
-    k_tank: float = Input(0.10, validator=Positive())
-    #: Propellant mass in this tank [kg] — for empirical mass bound
-    propellant_mass_in_tank: float = Input(1.0, validator=Positive())
+    required_volume:    float = Input(1000.05,  validator=Positive())
+    max_outer_diameter: float = Input(0.10,  validator=Positive())
+    wall_thickness:     float = Input(0.003, validator=Positive())
+    x_start:            float = Input(0.0)
+    color:              str   = Input("orange")
+    popup_warnings:     bool  = Input(False)
 
     @Attribute
     def outer_diameter(self):
@@ -151,68 +138,13 @@ class PropellantTank(Base):
         using the inner radius – this is the propellant-carrying volume."""
         return (4.0 / 3.0) * pi * self.inner_radius ** 3
 
-    # ------------------------------------------------------------------
-    # Tank structural mass
-    # ------------------------------------------------------------------
-
-    @Attribute
-    def t_wall_hoop(self):
-        """
-        Minimum wall thickness from hoop-stress formula [m].
-        Shigley Eq. 3-68 (thin-wall pressure vessel):
-            t = P_design * r_inner / sigma_allow
-        where P_design = q_max * factor_of_safety.
-        Clamped to wall_thickness if that is larger (manufacturing minimum).
-        Reference: Shigley, Mechanical Engineering Design, Eq. 3-68.
-        """
-        p_design = self.q_max * self.factor_of_safety
-        t_hoop = p_design * self.inner_radius / self.sigma_allow
-        return max(t_hoop, self.wall_thickness)
-
-    @Attribute
-    def wall_mass_hoop(self):
-        """
-        Tank wall mass from hoop-stress thickness [kg].
-        Cylinder lateral surface + two hemispherical caps.
-        m_wall = rho_wall * t_wall_hoop * (pi * d_inner * L_cyl
-                                           + 4 * pi * r_inner^2)
-        Reference: Standard pressure vessel geometry.
-        """
-        t = self.t_wall_hoop
-        lateral = pi * self.inner_diameter * self.cylindrical_length
-        caps = 4.0 * pi * self.inner_radius ** 2
-        return self.rho_wall * t * (lateral + caps)
-
-    @Attribute
-    def wall_mass_empirical(self):
-        """
-        Semi-empirical tank structural mass [kg].
-        m_tank = K_TANK * m_propellant  (AIAA-2004-3791)
-        Provides a lower bound for lightweight composite tanks.
-        """
-        return self.k_tank * self.propellant_mass_in_tank
-
-    @Attribute
-    def structural_mass(self):
-        """
-        Tank structural mass [kg]: max of hoop-stress and empirical estimate.
-        Taking the maximum is conservative and guards against both
-        thin-wall failure (hoop) and mass underestimation (empirical).
-        Reference: AIAA-2004-3791, Shigley Eq. 3-68.
-        """
-        return max(self.wall_mass_hoop, self.wall_mass_empirical)
-
     @Attribute
     def cylindrical_length(self):
         """
         Length of the cylindrical midsection [m].
         Sized so that V_caps + V_cylinder = required_volume exactly.
-            V_caps = (4/3)*pi*r_i^3  (two hemispheres = one sphere)
-            L_cyl  = (V_required - V_caps) / (pi * r_i^2)
-
-        If tank diameter is so large that end-caps alone exceed the
-        required volume a warning is issued and 0.0 is returned so the
-        model tree stays intact.  Reduce tank_diameter_fraction (try 0.40).
+            V_caps   = (4/3)π r_i³  (two hemispheres = one sphere)
+            L_cyl    = (V_required − V_caps) / (π r_i²)
         """
         net = self.required_volume - self.cap_volume
         if net < 0:
@@ -340,17 +272,15 @@ class PropellantTank(Base):
     @Attribute
     def summary(self):
         return {
-            "required_volume_m3": round(self.required_volume, 4),
-            "outer_diameter_m": round(self.outer_diameter, 3),
-            "inner_diameter_m": round(self.inner_diameter, 3),
-            "cap_volume_m3": round(self.cap_volume, 4),
+            "required_volume_m3":   round(self.required_volume, 4),
+            "outer_diameter_m":     round(self.outer_diameter, 3),
+            "inner_diameter_m":     round(self.inner_diameter, 3),
+            "cap_volume_m3":        round(self.cap_volume, 4),
             "cylindrical_length_m": round(self.cylindrical_length, 3),
-            "total_length_m": round(self.total_length, 3),
-            "tank_LD_ratio": round(self.checked_aspect_ratio, 2),
-            "t_wall_hoop_mm": round(self.t_wall_hoop * 1e3, 2),
-            "structural_mass_kg": round(self.structural_mass, 3),
-            "x_start_m": round(self.x_start, 3),
-            "x_center_m": round(self.x_center, 3),
+            "total_length_m":       round(self.total_length, 3),
+            "tank_LD_ratio":        round(self.checked_aspect_ratio, 2),
+            "x_start_m":            round(self.x_start, 3),
+            "x_center_m":           round(self.x_center, 3),
         }
 
 
@@ -411,7 +341,7 @@ class PropulsionSystem(Base):
     #: Maximum tank outer diameter [m] = fraction × fuselage inner diameter
     max_tank_diameter: float = Input(0.20, validator=Positive())
 
-    #: Tank wall thickness [m]  (manufacturing minimum; hoop-stress may be larger)
+    #: Tank wall thickness [m]
     tank_wall_thickness: float = Input(0.003, validator=Positive())
 
     #: Gap between oxidiser and fuel tank [m]
@@ -420,41 +350,26 @@ class PropulsionSystem(Base):
     #: X-position where the tank stack starts [m] = fuselage.x_propulsion_bay_start
     x_tanks_start: float = Input(0.0)
 
-    #: Maximum dynamic pressure [Pa] — passed through to tank wall sizing
-    q_max: float = Input(50e3, validator=Positive())
-
-    #: Allowable hoop stress [Pa]  Al-2219-T87 (common tank alloy)
-    sigma_allow_tank: float = Input(345e6, validator=Positive())
-
-    #: Tank wall material density [kg/m³]
-    rho_wall: float = Input(2840.0, validator=Positive())
-
-    #: Design factor of safety on burst pressure
-    factor_of_safety: float = Input(1.5, validator=Between(1.0, 3.0))
-
-    #: Semi-empirical tank mass coefficient (AIAA-2004-3791)
-    k_tank: float = Input(0.10, validator=Positive())
-
     popup_warnings: bool = Input(False)
 
     # ------------------------------------------------------------------
     # Physical constants (never Inputs)
     # ------------------------------------------------------------------
 
-    _G0 = 9.80665
-    _SOUND_30KM = 300.0  # ISA speed of sound at ~30 km [m/s]
+    _G0         = 9.80665
+    _SOUND_30KM = 300.0    # ISA speed of sound at ~30 km [m/s]
 
     # ------------------------------------------------------------------
     # Embedded engineering knowledge
     # ------------------------------------------------------------------
 
-    BURNOUT_ALTITUDE = 30_000.0  # [m]
-    DRAG_LOSS_ASCENT = 200.0  # [m/s]
-    GRAVITY_LOSS_ASCENT = 200.0  # [m/s]
-    DESCENT_DV = 80.0  # [m/s]  glide approach correction burn
-    PROPELLANT_MARGIN = 0.05  # [-]
+    BURNOUT_ALTITUDE    = 30_000.0  # [m]
+    DRAG_LOSS_ASCENT    = 200.0     # [m/s]
+    GRAVITY_LOSS_ASCENT = 200.0     # [m/s]
+    DESCENT_DV          = 80.0      # [m/s]  glide approach correction burn
+    PROPELLANT_MARGIN   = 0.05      # [-]
 
-    ULLAGE_SELF_PRESS = 0.02
+    ULLAGE_SELF_PRESS    = 0.02
     ULLAGE_NON_SELFPRESS = 0.05
 
     # Structural fraction by launch mode
@@ -550,8 +465,8 @@ class PropulsionSystem(Base):
         dh = self.target_apogee - self.BURNOUT_ALTITUDE
         if dh <= 0:
             warnings.warn(
-                f"target_apogee ({self.target_apogee / 1e3:.1f} km) <= "
-                f"burnout altitude ({self.BURNOUT_ALTITUDE / 1e3:.0f} km)."
+                f"target_apogee ({self.target_apogee/1e3:.1f} km) <= "
+                f"burnout altitude ({self.BURNOUT_ALTITUDE/1e3:.0f} km)."
             )
             return self.burnout_speed
         return max(sqrt(2.0 * self._G0 * dh), self.burnout_speed)
@@ -584,105 +499,18 @@ class PropulsionSystem(Base):
     @Attribute
     def gross_mass(self):
         """
-        Gross liftoff mass [kg] from iterative mass loop.
-
-        Why iterate?
-        The closed-form solution
-            gross = payload / (1 - prop_frac - struct_frac)
-        assumes structural_fraction is constant.  In reality, structural
-        mass includes the tank walls whose thickness depends on q_max and
-        the tank radius, which itself depends on the propellant volume,
-        which depends on gross_mass.  The iteration resolves this coupling.
-
-        Algorithm (fixed-point iteration):
-            1. Seed: gross_0 = payload / (1 - prop_frac - struct_frac_fixed)
-            2. Compute propellant masses from gross_i
-            3. Compute tank wall masses from propellant volumes + q_max
-            4. gross_{i+1} = payload + prop_mass + struct_mass_fixed
-                            + tank_wall_mass_ox + tank_wall_mass_fu
-            5. Repeat until |gross_{i+1} - gross_i| / gross_i < tolerance
-
-        Convergence is typically reached in 3-5 iterations.
-        Reference: Humble, Henry & Larson Ch. 4; Raymer Ch. 15.
+        Gross liftoff mass [kg] – DERIVED, never a user input.
+        gross = payload / (1 - propellant_fraction - structural_fraction)
         """
-        from math import exp as _exp, pi as _pi, sqrt as _sqrt
-
-        tol = 1e-6  # relative convergence tolerance
-        max_iter = 50
-
-        # Propellant properties
-        isp = self.isp
-        dv = self.required_delta_v
-        g0 = self._G0
-        mr = self.mixture_ratio
-        rho_ox = self.oxidizer_density
-        rho_fu = self.fuel_density
-        ullage = self.ullage_fraction
-        s_frac = self.structural_fraction  # fixed airframe fraction
-        m_pay = self.payload_mass
-
-        # Tank wall parameters
-        r_tank = 0.5 * self.max_tank_diameter - self.tank_wall_thickness
-        p_design = self.q_max * self.factor_of_safety
-        t_hoop = max(p_design * r_tank / self.sigma_allow_tank,
-                     self.tank_wall_thickness)
-        rho_w = self.rho_wall
-        k_t = self.k_tank
-
-        # Seed from closed-form (ignores tank wall mass)
-        mass_ratio_0 = _exp(dv / (g0 * isp))
-        prop_frac_0 = 1.0 - 1.0 / mass_ratio_0
-        denom_0 = 1.0 - prop_frac_0 - s_frac
-        if denom_0 <= 0:
+        denom = 1.0 - self.propellant_fraction - self.structural_fraction
+        if denom <= 0:
             raise ValueError(
-                f"Vehicle not feasible: prop_frac ({prop_frac_0:.3f}) + "
-                f"struct_frac ({s_frac:.3f}) >= 1.0. Reduce mission targets "
-                "or choose higher-Isp propellant."
+                f"Vehicle not feasible: propellant fraction "
+                f"({self.propellant_fraction:.3f}) + structural fraction "
+                f"({self.structural_fraction:.3f}) >= 1.0. "
+                "Reduce apogee, burnout Mach, or choose higher-Isp propellant."
             )
-        gross = m_pay / denom_0
-
-        for iteration in range(max_iter):
-            # Propellant masses from current gross
-            mass_ratio = _exp(dv / (g0 * isp))
-            prop_frac = 1.0 - 1.0 / mass_ratio
-            m_prop = prop_frac * gross
-            m_fu = m_prop / (1.0 + mr)
-            m_ox = m_prop - m_fu
-
-            # Propellant volumes (with ullage)
-            v_fu = (m_fu / rho_fu) / (1.0 - ullage)
-            v_ox = (m_ox / rho_ox) / (1.0 - ullage)
-
-            # Tank cylindrical lengths from volume accounting
-            # V_cyl = V_req - (4/3)*pi*r^3;  L_cyl = V_cyl / (pi*r^2)
-            v_cap = (4.0 / 3.0) * _pi * r_tank ** 3
-            l_cyl_fu = max((v_fu - v_cap) / (_pi * r_tank ** 2), 0.0)
-            l_cyl_ox = max((v_ox - v_cap) / (_pi * r_tank ** 2), 0.0)
-
-            # Tank wall mass: hoop-stress method vs empirical, take max
-            r_inner = r_tank
-            caps_area = 4.0 * _pi * r_inner ** 2
-            m_wall_fu = rho_w * t_hoop * (_pi * 2 * r_inner * l_cyl_fu + caps_area)
-            m_wall_ox = rho_w * t_hoop * (_pi * 2 * r_inner * l_cyl_ox + caps_area)
-            m_wall_fu = max(m_wall_fu, k_t * m_fu)
-            m_wall_ox = max(m_wall_ox, k_t * m_ox)
-
-            # New gross estimate
-            m_struct_airframe = s_frac * gross  # scales with gross
-            gross_new = m_pay + m_prop + m_struct_airframe + m_wall_fu + m_wall_ox
-
-            # Convergence check
-            if abs(gross_new - gross) / gross < tol:
-                gross = gross_new
-                break
-            gross = 0.6 * gross_new + 0.4 * gross  # relaxed update
-        else:
-            warnings.warn(
-                f"gross_mass iteration did not converge in {max_iter} steps. "
-                f"Last value: {gross:.2f} kg. Results may be inaccurate."
-            )
-
-        return gross
+        return self.payload_mass / denom
 
     @Attribute
     def structural_mass(self):
@@ -754,37 +582,6 @@ class PropulsionSystem(Base):
     # Tank Parts  (formerly in TankSystem / tanks.py)
     # ------------------------------------------------------------------
 
-    @Attribute
-    def checked_tank_diameter(self):
-        """
-        Verify max_tank_diameter is small enough that the hemispherical
-        end-cap volume does not exceed the smallest propellant volume
-        (always the fuel tank for high O/F propellants).
-
-        Rule (Humble et al.): inner_radius < (3*V_min/(4*pi))^(1/3)
-        i.e. tank_diameter < 2*(3*V_min/(4*pi))^(1/3) + 2*wall_thickness
-        """
-        r_i = self.max_tank_diameter / 2.0 - self.tank_wall_thickness
-        cap_vol = (4.0 / 3.0) * pi * r_i ** 3
-        min_vol = min(self.fuel_volume, self.oxidizer_volume)
-        if cap_vol >= min_vol:
-            # compute maximum safe outer diameter
-            r_max = (3.0 * min_vol / (4.0 * pi)) ** (1.0 / 3.0)
-            d_max = 2.0 * (r_max + self.tank_wall_thickness)
-            msg = (
-                f"max_tank_diameter ({self.max_tank_diameter * 1e3:.1f} mm) is "
-                f"too large: hemispherical caps ({cap_vol * 1e3:.3f} L) would "
-                f"exceed smallest propellant volume ({min_vol * 1e3:.3f} L). "
-                f"Maximum safe tank diameter: {d_max * 1e3:.1f} mm. "
-                f"Reduce tank_diameter_fraction below "
-                f"{d_max / (self.max_tank_diameter / (self.max_tank_diameter / self.max_tank_diameter)):.2f} "
-                "or increase the mission delta-V targets to grow propellant volumes."
-            )
-            warnings.warn(msg)
-            if self.popup_warnings:
-                generate_warning("Tank diameter too large", msg)
-        return self.max_tank_diameter
-
     @Part
     def oxidizer_tank(self):
         """
@@ -799,12 +596,6 @@ class PropulsionSystem(Base):
             wall_thickness=self.tank_wall_thickness,
             x_start=self.x_oxidizer_tank,
             color="blue",
-            q_max=self.q_max,
-            sigma_allow=self.sigma_allow_tank,
-            rho_wall=self.rho_wall,
-            factor_of_safety=self.factor_of_safety,
-            k_tank=self.k_tank,
-            propellant_mass_in_tank=self.oxidizer_mass,
             popup_warnings=self.popup_warnings,
         )
 
@@ -820,12 +611,6 @@ class PropulsionSystem(Base):
             wall_thickness=self.tank_wall_thickness,
             x_start=self.x_fuel_tank,
             color="green",
-            q_max=self.q_max,
-            sigma_allow=self.sigma_allow_tank,
-            rho_wall=self.rho_wall,
-            factor_of_safety=self.factor_of_safety,
-            k_tank=self.k_tank,
-            propellant_mass_in_tank=self.fuel_mass,
             popup_warnings=self.popup_warnings,
         )
 
@@ -843,7 +628,7 @@ class PropulsionSystem(Base):
             warnings.warn(msg)
             if self.popup_warnings:
                 generate_warning("Low payload fraction", msg)
-        elif pf > 0.40:
+        elif pf > 0.10:
             msg = (f"Payload fraction {pf:.2%} > 10 % — verify structural "
                    "fraction assumption for a reusable vehicle.")
             warnings.warn(msg)
@@ -864,12 +649,6 @@ class PropulsionSystem(Base):
         return pf
 
     @Attribute
-    def tank_wall_mass(self):
-        """Total structural mass of both tanks [kg]."""
-        return (self.oxidizer_tank.structural_mass
-                + self.fuel_tank.structural_mass)
-
-    @Attribute
     def checked_burnout_mach(self):
         m = self.zoom_delta_v / self._SOUND_30KM
         if m < 1.0:
@@ -888,41 +667,35 @@ class PropulsionSystem(Base):
     def summary(self):
         return {
             # Configuration
-            "launch_mode": self.launch_mode,
-            "landing_mode": "unpowered glide → runway (both modes)",
-            "propulsion_type": self.propulsion_type,
-            "isp_s": round(self.isp, 1),
-            "mixture_ratio_OF": round(self.mixture_ratio, 2),
-            "self_pressurising": self.is_self_pressurising,
+            "launch_mode":                  self.launch_mode,
+            "landing_mode":                 "unpowered glide → runway (both modes)",
+            "propulsion_type":              self.propulsion_type,
+            "isp_s":                        round(self.isp, 1),
+            "mixture_ratio_OF":             round(self.mixture_ratio, 2),
+            "self_pressurising":            self.is_self_pressurising,
             # Delta-V
-            "max_burnout_mach": round(self.max_burnout_mach, 2),
-            "burnout_speed_m_s": round(self.burnout_speed, 1),
-            "zoom_delta_v_m_s": round(self.zoom_delta_v, 1),
-            "required_delta_v_m_s": round(self.required_delta_v, 1),
+            "max_burnout_mach":             round(self.max_burnout_mach, 2),
+            "burnout_speed_m_s":            round(self.burnout_speed, 1),
+            "zoom_delta_v_m_s":             round(self.zoom_delta_v, 1),
+            "required_delta_v_m_s":         round(self.required_delta_v, 1),
             # Mass
-            "structural_fraction": round(self.structural_fraction, 3),
-            "propellant_fraction": round(self.checked_propellant_fraction, 3),
-            "gross_mass_kg": round(self.gross_mass, 1),
-            "structural_mass_kg": round(self.structural_mass, 1),
-            "propellant_mass_kg": round(self.propellant_mass, 1),
-            "fuel_mass_kg": round(self.fuel_mass, 1),
-            "oxidizer_mass_kg": round(self.oxidizer_mass, 1),
+            "structural_fraction":          round(self.structural_fraction, 3),
+            "propellant_fraction":          round(self.checked_propellant_fraction, 3),
+            "gross_mass_kg":                round(self.gross_mass, 1),
+            "structural_mass_kg":           round(self.structural_mass, 1),
+            "propellant_mass_kg":           round(self.propellant_mass, 1),
+            "fuel_mass_kg":                 round(self.fuel_mass, 1),
+            "oxidizer_mass_kg":             round(self.oxidizer_mass, 1),
             # Tank volumes and geometry
-            "fuel_volume_m3": round(self.fuel_volume, 4),
-            "oxidizer_volume_m3": round(self.oxidizer_volume, 4),
-            "total_propellant_volume_m3": round(self.total_propellant_volume, 4),
-            "tank_system_length_m": round(self.tank_system_length, 3),
-            "max_tank_diameter_m": round(self.max_tank_diameter, 3),
+            "fuel_volume_m3":               round(self.fuel_volume, 4),
+            "oxidizer_volume_m3":           round(self.oxidizer_volume, 4),
+            "total_propellant_volume_m3":   round(self.total_propellant_volume, 4),
+            "tank_system_length_m":         round(self.tank_system_length, 3),
+            "max_tank_diameter_m":          round(self.max_tank_diameter, 3),
             # Thrust
-            "thrust_N": round(self.thrust, 1),
-            "thrust_to_weight": round(self.thrust_to_weight, 2),
-            "payload_fraction": round(self.checked_payload_fraction, 4),
-            # Tank structural mass
-            "tank_wall_mass_kg": round(self.tank_wall_mass, 3),
-            "ox_tank_wall_mass_kg": round(self.oxidizer_tank.structural_mass, 3),
-            "fu_tank_wall_mass_kg": round(self.fuel_tank.structural_mass, 3),
-            "ox_tank_t_wall_mm": round(self.oxidizer_tank.t_wall_hoop * 1e3, 2),
-            "fu_tank_t_wall_mm": round(self.fuel_tank.t_wall_hoop * 1e3, 2),
+            "thrust_N":                     round(self.thrust, 1),
+            "thrust_to_weight":             round(self.thrust_to_weight, 2),
+            "payload_fraction":             round(self.checked_payload_fraction, 4),
         }
 
 
@@ -937,7 +710,7 @@ if __name__ == "__main__":
         target_apogee=100e3,
         max_burnout_mach=3.5,
         thrust_to_weight=1.5,
-        max_tank_diameter=0.200,
+        max_tank_diameter=0.09,
         tank_wall_thickness=0.003,
         intertank_spacing=0.05,
         x_tanks_start=0.0,

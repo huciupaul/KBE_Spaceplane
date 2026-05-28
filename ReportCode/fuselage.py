@@ -1,0 +1,528 @@
+"""
+fuselage.py
+
+Parametric fuselage for the suborbital research spaceplane KBE application.
+
+Geometry is built from three clean sub-objects:
+    _NoseCone  - Von Karman-Haack ogive lofted through BSpline cross-sections
+    _Barrel    - straight cylinder lofted between two circles
+    _BoatTail  - conical taper to engine exit diameter
+
+Interior reference boxes (not structural):
+    payload_bay_box  - red,    CubeSat standard envelope
+    avionics_bay_box - yellow, exact user-dimension box
+
+Engineering knowledge:
+    Vos, Hoogreef, Zandbergen - TU Delft fuselage design slides (2025)
+    Von Karman-Haack: minimum-wave-drag body of revolution
+
+Part of Team 24 KBE Assignment - Spaceplane conceptual design tool.
+"""
+
+from math import pi, sqrt
+import math
+import numpy as np
+import warnings
+
+from parapy.core import *
+from parapy.geom import *
+from parapy.core.validate import *
+
+
+# ---------------------------------------------------------------------------
+# Warning helper
+# ---------------------------------------------------------------------------
+
+def generate_warning(header: str, msg: str):
+    from tkinter import Tk, messagebox
+    window = Tk()
+    window.withdraw()
+    messagebox.showwarning(header, msg)
+    window.destroy()
+
+
+# ---------------------------------------------------------------------------
+# CubeSat standard dimensions  (ECSS-E-ST-10-04C / CDS Rev 14)
+# ---------------------------------------------------------------------------
+
+CUBESAT_STANDARDS = {
+    "1U":  (0.100, 0.100, 0.113),
+    "3U":  (0.100, 0.100, 0.340),
+    "6U":  (0.100, 0.226, 0.340),
+    "12U": (0.226, 0.226, 0.340),
+}
+
+
+# ---------------------------------------------------------------------------
+# Helper: circular cross-section control points
+# ---------------------------------------------------------------------------
+
+def _circle_points(x_pos, radius, n=9):
+    """
+    n Points forming a closed circle in the YZ-plane at x_pos.
+    n=9 gives a good BSpline circle approximation; last == first (closed).
+    """
+    pts = []
+    for i in range(n):
+        angle = 2.0 * math.pi * i / (n - 1)
+        pts.append(Point(x_pos,
+                         radius * math.cos(angle),
+                         radius * math.sin(angle)))
+    return pts
+
+
+# ---------------------------------------------------------------------------
+# _NoseCone  - Von Karman-Haack ogive
+# ---------------------------------------------------------------------------
+
+class _NoseCone(Base):
+    """
+    Von Karman-Haack ogive nose cone lofted through n_sects BSpline sections.
+
+    Radius distribution (minimum-wave-drag body of revolution):
+        theta(x):  x = L_nose * (1 - cos theta) / 2,   theta in [0, pi]
+        r(theta) = R_fus * sqrt[(theta - 0.5*sin(2*theta)) / pi]
+
+    The loft runs tip to base so it connects flush with the barrel.
+    """
+
+    L_nose:  float = Input()
+    R_fus:   float = Input()
+    n_sects: int   = Input(8)
+
+    @Attribute
+    def _profile_curves(self):
+        """
+        BSpline cross-sections from tip to base.
+        Kept as an @Attribute so @Part surface stays a single return.
+        """
+        curves = []
+        for i in range(self.n_sects):
+            theta = math.pi * (i + 0.5) / self.n_sects
+            x_pos = self.L_nose * (1.0 - math.cos(theta)) / 2.0
+            r_k   = self.R_fus * math.sqrt(
+                        (theta - 0.5 * math.sin(2.0 * theta)) / math.pi)
+            pts = _circle_points(x_pos, max(r_k, 1e-4))
+            curves.append(BSplineCurve(control_points=pts,
+                                       label="nose_sect_%d" % i))
+        pts_base = _circle_points(self.L_nose, self.R_fus)
+        curves.append(BSplineCurve(control_points=pts_base,
+                                   label="nose_base"))
+        return curves
+
+    @Part
+    def surface(self):
+        return LoftedSurface(profiles=self._profile_curves,
+                             label="nose_cone")
+
+
+# ---------------------------------------------------------------------------
+# _Barrel  - straight cylindrical section
+# ---------------------------------------------------------------------------
+
+class _Barrel(Base):
+    """Straight cylindrical barrel lofted between two BSpline circles."""
+
+    x_start: float = Input()
+    x_end:   float = Input()
+    R_fus:   float = Input()
+
+    @Attribute
+    def _pts_fwd(self):
+        return _circle_points(self.x_start, self.R_fus)
+
+    @Part
+    def fwd_curve(self):
+        return BSplineCurve(control_points=self._pts_fwd,
+                            label="barrel_fwd")
+
+    @Attribute
+    def _pts_aft(self):
+        return _circle_points(self.x_end, self.R_fus)
+
+    @Part
+    def aft_curve(self):
+        return BSplineCurve(control_points=self._pts_aft,
+                            label="barrel_aft")
+
+    @Part
+    def surface(self):
+        return LoftedSurface(profiles=[self.fwd_curve, self.aft_curve],
+                             label="barrel_surface")
+
+
+# ---------------------------------------------------------------------------
+# _BoatTail  - conical aft closure to engine exit
+# ---------------------------------------------------------------------------
+
+class _BoatTail(Base):
+    """Conical taper from fuselage radius to engine exit radius."""
+
+    x_start:  float = Input()
+    L_tail:   float = Input()
+    R_fus:    float = Input()
+    R_engine: float = Input()
+
+    @Attribute
+    def x_end(self):
+        return self.x_start + self.L_tail
+
+    @Attribute
+    def _pts_fwd(self):
+        return _circle_points(self.x_start, self.R_fus)
+
+    @Part
+    def fwd_curve(self):
+        return BSplineCurve(control_points=self._pts_fwd,
+                            label="tail_fwd")
+
+    @Attribute
+    def _pts_aft(self):
+        return _circle_points(self.x_end, self.R_engine)
+
+    @Part
+    def aft_curve(self):
+        return BSplineCurve(control_points=self._pts_aft,
+                            label="tail_aft")
+
+    @Part
+    def surface(self):
+        return LoftedSurface(profiles=[self.fwd_curve, self.aft_curve],
+                             label="boat_tail")
+
+
+# ---------------------------------------------------------------------------
+# StandardPayloadBay
+# ---------------------------------------------------------------------------
+
+class StandardPayloadBay(Base):
+    """
+    Primary payload bay sized to a CubeSat standard (1U / 3U / 6U / 12U).
+    required_diameter = diagonal of CubeSat cross-section + 2*clearance.
+    """
+
+    cubesat_standard: str   = Input("3U", validator=OneOf(list(CUBESAT_STANDARDS.keys())))
+    n_units_stacked:  int   = Input(1,    validator=Positive())
+    clearance:        float = Input(0.030, validator=Positive(incl_zero=True))
+
+    @Attribute
+    def cubesat_dims(self):
+        return CUBESAT_STANDARDS[self.cubesat_standard]
+
+    @Attribute
+    def cs_length(self):
+        return self.cubesat_dims[2]
+
+    @Attribute
+    def cs_width(self):
+        return self.cubesat_dims[0]
+
+    @Attribute
+    def cs_depth(self):
+        return self.cubesat_dims[1]
+
+    @Attribute
+    def required_longitudinal(self):
+        return self.cs_length * self.n_units_stacked + 2.0 * self.clearance
+
+    @Attribute
+    def required_lateral(self):
+        return self.cs_width + 2.0 * self.clearance
+
+    @Attribute
+    def required_vertical(self):
+        return self.cs_depth + 2.0 * self.clearance
+
+    @Attribute
+    def required_diameter(self):
+        return sqrt(self.required_lateral ** 2 + self.required_vertical ** 2)
+
+    @Attribute
+    def required_volume(self):
+        return (self.required_longitudinal
+                * self.required_lateral
+                * self.required_vertical)
+
+
+# ---------------------------------------------------------------------------
+# AvionicsBay
+# ---------------------------------------------------------------------------
+
+class AvionicsBay(Base):
+    """Avionics bay - exact user-supplied box dimensions, no clearance logic."""
+
+    avionics_box_length: float = Input(0.150, validator=Positive())
+    avionics_box_width:  float = Input(0.120, validator=Positive())
+    avionics_box_height: float = Input(0.080, validator=Positive())
+
+    @Attribute
+    def total_bay_length(self):
+        return self.avionics_box_length
+
+
+# ---------------------------------------------------------------------------
+# Fuselage  - root class
+# ---------------------------------------------------------------------------
+
+class Fuselage(Base):
+    """
+    Rule-based parametric fuselage for a suborbital research spaceplane.
+
+    Geometry (three clean surfaces, no boolean operations):
+        nose_cone  - Von Karman-Haack lofted surface
+        barrel     - straight cylinder lofted between two circles
+        boat_tail  - conical taper to engine exit diameter
+
+    Interior reference boxes (transparent, not structural):
+        payload_bay_box  - red,    CubeSat primary science payload
+        avionics_bay_box - yellow, avionics electronics
+
+    Section layout (nose tip to tail tip):
+        [nose cone] [payload bay] [avionics bay] [propulsion bay] [boat-tail]
+
+    Soft-rule warnings on slenderness and fineness ratios.
+    Reference: Vos et al. TU Delft slides 2025
+    """
+
+    payload_bay:           StandardPayloadBay = Input(StandardPayloadBay())
+    avionics:              AvionicsBay        = Input(AvionicsBay())
+    propulsion_bay_length: float              = Input(1.20, validator=GreaterThan(0))
+    structural_wall_depth: float              = Input(0.050, validator=Between(0.02, 0.15))
+    min_inner_diameter:    float              = Input(0.30)
+    nose_fineness:         float              = Input(1.8)
+    tail_fineness:         float              = Input(2.5)
+    engine_exit_diameter:  float              = Input(0.40, validator=Positive())
+    n_nose_sects:          int                = Input(8)
+    popup_warnings:        bool               = Input(False)
+
+    # ── Diameters ─────────────────────────────────────────────────────
+
+    @Attribute
+    def inner_diameter(self):
+        return max(self.payload_bay.required_diameter, self.min_inner_diameter)
+
+    @Attribute
+    def outer_diameter(self):
+        return self.inner_diameter + 2.0 * self.structural_wall_depth
+
+    @Attribute
+    def outer_radius(self):
+        return 0.5 * self.outer_diameter
+
+    @Attribute
+    def inner_radius(self):
+        return 0.5 * self.inner_diameter
+
+    # ── Section lengths ───────────────────────────────────────────────
+
+    @Attribute
+    def nose_length(self):
+        """L_nose = nose_fineness x D_outer  [Vos Slide 57]"""
+        return self.nose_fineness * self.outer_diameter
+
+    @Attribute
+    def cylindrical_length(self):
+        return (self.payload_bay.required_longitudinal
+                + self.avionics.total_bay_length
+                + self.propulsion_bay_length)
+
+    @Attribute
+    def tail_length(self):
+        """L_tail = tail_fineness x D_outer  [Vos Slide 56]"""
+        return self.tail_fineness * self.outer_diameter
+
+    @Attribute
+    def total_length(self):
+        return self.nose_length + self.cylindrical_length + self.tail_length
+
+    # ── Soft-rule checks ──────────────────────────────────────────────
+
+    @Attribute
+    def slenderness_ratio(self):
+        """L/D - target 20-25 for transonic spaceplane [Vos Slide 12]."""
+        sr = self.total_length / self.outer_diameter
+        if sr < 20.0:
+            msg = (f"Slenderness ratio {sr:.2f} < 20 - "
+                   "below transonic target (20-25), pressure drag elevated.")
+            warnings.warn(msg)
+            if self.popup_warnings:
+                generate_warning("Slenderness ratio", msg)
+        elif sr > 25.0:
+            msg = f"Slenderness ratio {sr:.2f} > 25 - bending loads critical."
+            warnings.warn(msg)
+            if self.popup_warnings:
+                generate_warning("Slenderness ratio", msg)
+        return sr
+
+    @Attribute
+    def checked_nose_fineness(self):
+        if self.nose_fineness < 1.5:
+            msg = (f"nose_fineness ({self.nose_fineness:.2f}) < 1.5 - "
+                   "blunt nose, elevated wave drag at transonic speed.")
+            warnings.warn(msg)
+            if self.popup_warnings:
+                generate_warning("Nose fineness", msg)
+        return self.nose_fineness
+
+    @Attribute
+    def checked_tail_fineness(self):
+        if self.tail_fineness < 1.0:
+            msg = (f"tail_fineness ({self.tail_fineness:.2f}) < 1.0 - "
+                   "steep boat-tail, flow separation risk.")
+            warnings.warn(msg)
+            if self.popup_warnings:
+                generate_warning("Tail fineness", msg)
+        return self.tail_fineness
+
+    # ── X-positions (origin = nose tip) ──────────────────────────────
+
+    @Attribute
+    def x_nose_base(self):
+        return self.nose_length
+
+    @Attribute
+    def x_payload_bay_start(self):
+        return self.x_nose_base
+
+    @Attribute
+    def x_avionics_start(self):
+        return self.x_payload_bay_start + self.payload_bay.required_longitudinal
+
+    @Attribute
+    def x_propulsion_bay_start(self):
+        return self.x_avionics_start + self.avionics.total_bay_length
+
+    @Attribute
+    def x_tail_start(self):
+        return self.nose_length + self.cylindrical_length
+
+    @Attribute
+    def x_tail_tip(self):
+        return self.total_length
+
+    # ── Geometry Parts ────────────────────────────────────────────────
+
+    @Part
+    def nose_cone(self):
+        return _NoseCone(
+            L_nose=self.nose_length,
+            R_fus=self.outer_radius,
+            n_sects=self.n_nose_sects,
+            label="nose_cone",
+        )
+
+    @Part
+    def barrel(self):
+        return _Barrel(
+            x_start=self.x_nose_base,
+            x_end=self.x_tail_start,
+            R_fus=self.outer_radius,
+            label="barrel",
+        )
+
+    @Part
+    def boat_tail(self):
+        return _BoatTail(
+            x_start=self.x_tail_start,
+            L_tail=self.tail_length,
+            R_fus=self.outer_radius,
+            R_engine=0.5 * self.engine_exit_diameter,
+            label="boat_tail",
+        )
+
+    # ── Interior reference boxes ──────────────────────────────────────
+
+    @Part
+    def payload_bay_box(self):
+        """CubeSat primary payload envelope - red, semi-transparent."""
+        return Box(
+            length=self.payload_bay.required_lateral,
+            width=self.payload_bay.required_longitudinal,
+            height=self.payload_bay.required_vertical,
+            centered=True,
+            position=Position(Point(
+                self.x_payload_bay_start
+                + 0.5 * self.payload_bay.required_longitudinal,
+                0, 0,
+            )),
+            color="red",
+            transparency=0.5,
+        )
+
+    @Part
+    def avionics_bay_box(self):
+        """Avionics box envelope - yellow, semi-transparent."""
+        return Box(
+            length=self.avionics.avionics_box_width,
+            width=self.avionics.avionics_box_length,
+            height=self.avionics.avionics_box_height,
+            centered=True,
+            position=Position(Point(
+                self.x_avionics_start
+                + 0.5 * self.avionics.avionics_box_length,
+                0, 0,
+            )),
+            color="yellow",
+            transparency=0.4,
+        )
+
+    # ── Summary ───────────────────────────────────────────────────────
+
+    @Attribute
+    def summary(self):
+        return {
+            "inner_diameter_m":         round(self.inner_diameter, 3),
+            "outer_diameter_m":         round(self.outer_diameter, 3),
+            "nose_length_m":            round(self.nose_length, 3),
+            "cylindrical_length_m":     round(self.cylindrical_length, 3),
+            "tail_length_m":            round(self.tail_length, 3),
+            "total_length_m":           round(self.total_length, 3),
+            "slenderness_ratio":        round(self.slenderness_ratio, 2),
+            "cubesat_standard":         self.payload_bay.cubesat_standard,
+            "payload_bay_volume_m3":    round(self.payload_bay.required_volume, 4),
+            "x_payload_bay_start_m":    round(self.x_payload_bay_start, 3),
+            "x_avionics_start_m":       round(self.x_avionics_start, 3),
+            "x_propulsion_bay_start_m": round(self.x_propulsion_bay_start, 3),
+            "x_tail_start_m":           round(self.x_tail_start, 3),
+        }
+
+    def print_summary(self):
+        print("\n" + "=" * 55)
+        print("  FUSELAGE SUMMARY")
+        print("=" * 55)
+        for k, v in self.summary.items():
+            print(f"  {k:<40} {v}")
+        print("=" * 55)
+
+
+# ---------------------------------------------------------------------------
+# Stand-alone entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    from parapy.gui import display
+
+    fu = Fuselage(
+        label="Spaceplane Fuselage (6U CubeSat)",
+        payload_bay=StandardPayloadBay(
+            cubesat_standard="6U",
+            n_units_stacked=1,
+            clearance=0.030,
+        ),
+        avionics=AvionicsBay(
+            avionics_box_length=0.150,
+            avionics_box_width=0.120,
+            avionics_box_height=0.080,
+        ),
+        propulsion_bay_length=1.20,
+        structural_wall_depth=0.050,
+        min_inner_diameter=0.100,
+        nose_fineness=1.8,
+        tail_fineness=1.3,
+        engine_exit_diameter=0.200,
+        n_nose_sects=8,
+        popup_warnings=False,
+    )
+
+    fu.print_summary()
+    display(fu)
