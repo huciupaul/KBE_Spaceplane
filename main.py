@@ -7,14 +7,11 @@ Sizing loop:
     PropulsionSystem.tank_system_length  →  Fuselage.propulsion_bay_length
 """
 
-import warnings
-
 from parapy.core import *
 from parapy.core.validate import *
-from parapy.geom import *
 
 from fuselage import Fuselage, StandardPayloadBay, AvionicsBay, CUBESAT_STANDARDS
-from propulsion_system import PropulsionSystem
+from github.KBE_Spaceplane.ReportCode.propulsion_system import PropulsionSystem
 
 
 class Spaceplane(Base):
