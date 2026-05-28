@@ -7,12 +7,14 @@ Sizing loop:
     PropulsionSystem.tank_system_length  →  Fuselage.propulsion_bay_length
 """
 
+import warnings
+
 from parapy.core import *
 from parapy.core.validate import *
+from parapy.geom import *
 
 from fuselage import Fuselage, StandardPayloadBay, AvionicsBay, CUBESAT_STANDARDS
-from github.KBE_Spaceplane.ReportCode.propulsion_system import PropulsionSystem
-
+from propulsion_system import PropulsionSystem
 
 class Spaceplane(Base):
     """Root assembly for the suborbital research spaceplane."""
@@ -32,6 +34,8 @@ class Spaceplane(Base):
     min_inner_diameter:    float = Input(0.30)
     nose_fineness:         float = Input(1.8)
     tail_fineness:         float = Input(2.5)
+    engine_exit_diameter:  float = Input(0.080, validator=Positive())
+    n_nose_sects:          int   = Input(8)
 
     # ── Mission / propulsion ──────────────────────────────────────────
     propulsion_type:        str   = Input("N2O_PROPYLENE")
@@ -45,6 +49,13 @@ class Spaceplane(Base):
     intertank_spacing:      float = Input(0.050, validator=Positive(incl_zero=True))
     tank_diameter_fraction: float = Input(0.40,  validator=Between(0.10, 0.90))
     tanks_avionics_margin:  float = Input(0.050, validator=Positive(incl_zero=True))
+
+    # ── Tank structural / q_max inputs ───────────────────────────────────
+    q_max:            float = Input(50e3,  validator=Positive())
+    sigma_allow_tank: float = Input(345e6, validator=Positive())
+    rho_wall:         float = Input(2840.0, validator=Positive())
+    factor_of_safety: float = Input(1.5,   validator=Between(1.0, 3.0))
+    k_tank:           float = Input(0.10,  validator=Positive())
 
     popup_warnings: bool = Input(False)
 
@@ -95,6 +106,11 @@ class Spaceplane(Base):
             tank_wall_thickness=self.tank_wall_thickness,
             intertank_spacing=self.intertank_spacing,
             x_tanks_start=self.x_tanks_start,
+            q_max=self.q_max,
+            sigma_allow_tank=self.sigma_allow_tank,
+            rho_wall=self.rho_wall,
+            factor_of_safety=self.factor_of_safety,
+            k_tank=self.k_tank,
             popup_warnings=self.popup_warnings,
         )
 
@@ -120,6 +136,8 @@ class Spaceplane(Base):
             min_inner_diameter=self.min_inner_diameter,
             nose_fineness=self.nose_fineness,
             tail_fineness=self.tail_fineness,
+            engine_exit_diameter=self.engine_exit_diameter,
+            n_nose_sects=self.n_nose_sects,
             popup_warnings=self.popup_warnings,
         )
 
@@ -149,6 +167,9 @@ class Spaceplane(Base):
             "thrust_N":                round(p.thrust, 1),
             "tank_system_length_m":    round(p.tank_system_length, 3),
             "max_tank_diameter_m":     round(p.max_tank_diameter, 3),
+            "tank_wall_mass_kg":       round(p.tank_wall_mass, 3),
+            "ox_tank_t_wall_mm":       round(p.oxidizer_tank.t_wall_hoop * 1e3, 2),
+            "fu_tank_t_wall_mm":       round(p.fuel_tank.t_wall_hoop * 1e3, 2),
         }
 
     def print_summary(self):
@@ -203,6 +224,13 @@ if __name__ == "__main__":
         intertank_spacing=0.050,
         tank_diameter_fraction=0.40,
         tanks_avionics_margin=0.050,
+        engine_exit_diameter=0.080,
+        n_nose_sects=8,
+        q_max=50e3,
+        sigma_allow_tank=345e6,
+        rho_wall=2840.0,
+        factor_of_safety=1.5,
+        k_tank=0.10,
     )
 
     vehicle.print_summary()

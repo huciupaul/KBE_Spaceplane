@@ -20,22 +20,20 @@
 #   Z -> up
 # All lengths in metres, masses in kilograms.
 
-
 import math
+import warnings
+from math import pi, sqrt
+import numpy as np
+import warnings
 
-# -- ParaPy core ---------------------------------------------------------------
-from parapy.core import Base, Input, Attribute, Part
-from parapy.geom import (
-    BSplineCurve,
-    LoftedSurface,
-    Box,
-    Point,
-)
+from parapy.core import *
+from parapy.geom import *
+from parapy.core.validate import *
+
 from parapy.gui import display
 
 # -- Load mock inputs ----------------------------------------------------------
 import inputs_fuselage as _IF
-
 
 # ------------------------------------------------------------------------------
 # Helper: circular cross-section control points at axial position x_pos
