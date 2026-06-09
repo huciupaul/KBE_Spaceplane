@@ -44,22 +44,30 @@ import inputs_wing as _IW
 # Section profile helper
 # ------------------------------------------------------------------------------
 
-def _diamond_section(chord, tc, x_le, y):
+def _diamond_section(chord, tc, x_le, y, reverse=False):
     """
     Return 5 Points forming a closed symmetric diamond aerofoil cross-section
     in the XZ-plane at spanwise coordinate y.
 
     Profile order: LE -> upper max-t -> TE -> lower max-t -> LE (closed).
     Suitable as BSplineCurve control_points for lofting.
+
+    reverse: set True for port (negative-Y) profiles so the winding direction
+    is consistent with the loft sweep direction (Y decreasing).  Without this
+    the LoftedSurface can twist or invert on the port side.
     """
     t_half = 0.5 * tc * chord
-    return [
+    pts = [
         Point(x_le,                 y,  0.0),     # LE
         Point(x_le + 0.15 * chord,  y,  t_half),  # upper max-thickness
         Point(x_le + chord,         y,  0.0),     # TE
         Point(x_le + 0.15 * chord,  y, -t_half),  # lower max-thickness
         Point(x_le,                 y,  0.0),     # LE again (closed)
     ]
+    if reverse:
+        # Reverse the interior points (keep first==last for closure)
+        pts = [pts[0]] + pts[1:-1][::-1] + [pts[-1]]
+    return pts
 
 
 # ------------------------------------------------------------------------------
@@ -74,25 +82,32 @@ class _WingHalf(Base):
 
     c_root    = Input()       # root chord [m]
     c_tip     = Input()       # tip chord  [m]
-    semi_span = Input()       # half-span  [m]
+    semi_span = Input()       # half-span from fuselage skin outward [m]
     tip_le_x  = Input()       # LE x-offset at tip (due to sweep) [m]
     x_root_le = Input()       # root LE x-position from nose [m]
     tc        = Input()       # thickness-to-chord ratio
     port      = Input(False)  # True -> port side (negative Y)
+    y_root    = Input(0.0)    # Y of root section = +/-R_fus [m]
 
     @Attribute
     def _y_tip(self):
-        return -self.semi_span if self.port else self.semi_span
+        # Tip is offset from the root (at fuselage skin), not from Y=0
+        if self.port:
+            return self.y_root - self.semi_span
+        return self.y_root + self.semi_span
 
     @Attribute
     def _root_ctrl_pts(self):
-        return _diamond_section(self.c_root, self.tc, self.x_root_le, 0.0)
+        # Root at fuselage outer skin (y_root = +/-R_fus), not centreline.
+        # reverse=self.port keeps winding consistent with loft direction.
+        return _diamond_section(self.c_root, self.tc, self.x_root_le,
+                                self.y_root, reverse=self.port)
 
     @Attribute
     def _tip_ctrl_pts(self):
         return _diamond_section(self.c_tip, self.tc,
                                 self.x_root_le + self.tip_le_x,
-                                self._y_tip)
+                                self._y_tip, reverse=self.port)
 
     @Part
     def root_curve(self):
@@ -137,6 +152,8 @@ class Wing(Base):
         doc="Centre-of-gravity x from nose [m]  (WeightAndCG)")
     fus_L_fus     = Input(_IW.fus_L_fus,
         doc="Total fuselage length [m]  (Fuselage)")
+    fus_R_fus     = Input(_IW.fus_R_fus,
+        doc="Fuselage outer radius [m]  (Fuselage) -- roots attach here")
 
     AIRFOIL_TC    = Input(_IW.AIRFOIL_TC,
         doc="Thickness-to-chord ratio t/c  (NACA 64A-005 = 0.05)")
@@ -274,7 +291,7 @@ class Wing(Base):
 
     @Part
     def starboard(self):
-        """Starboard (right) wing half-surface."""
+        """Starboard (right) wing half-surface.  Root at +R_fus."""
         return _WingHalf(
             c_root    = self.c_root,
             c_tip     = self.c_tip,
@@ -283,12 +300,13 @@ class Wing(Base):
             x_root_le = self.x_wing_le,
             tc        = self.AIRFOIL_TC,
             port      = False,
+            y_root    = self.fus_R_fus,
             label     = "starboard_wing",
         )
 
     @Part
     def port(self):
-        """Port (left) wing half-surface."""
+        """Port (left) wing half-surface.  Root at -R_fus."""
         return _WingHalf(
             c_root    = self.c_root,
             c_tip     = self.c_tip,
@@ -297,6 +315,7 @@ class Wing(Base):
             x_root_le = self.x_wing_le,
             tc        = self.AIRFOIL_TC,
             port      = True,
+            y_root    = -self.fus_R_fus,
             label     = "port_wing",
         )
 

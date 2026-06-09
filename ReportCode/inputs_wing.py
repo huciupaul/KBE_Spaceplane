@@ -37,7 +37,9 @@ mission_MTOW  =    200.0   # [kg]   take-off mass estimate (seeded value)
 # ── Fuselage geometry (normally from Fuselage) ────────────────────────────────
 # In combined mode these are overridden by Fuselage outputs (fus.L_fus etc.).
 # Provide sensible standalone fallback values matching inputs_fuselage.py defaults.
-fus_L_fus     =      4.0   # [m]    total fuselage length  (Fuselage.L_fus)
+fus_L_fus     =      4.0   # [m]    total fuselage length  (Fuselage.total_length)
+fus_R_fus     =      0.20  # [m]    fuselage outer radius  (Fuselage.outer_diameter/2)
+                           #        standalone fallback; overridden in main.py
 
 # ── Weight & CoM inputs (normally from WeightAndCG) ───────────────────────────
 # In combined mode these are overridden by Fuselage outputs.

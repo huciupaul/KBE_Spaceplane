@@ -15,6 +15,7 @@ from parapy.geom import *
 
 from fuselage import Fuselage, StandardPayloadBay, AvionicsBay, CUBESAT_STANDARDS
 from propulsion_system import PropulsionSystem
+from wing_trial_1 import Wing
 
 class Spaceplane(Base):
     """Root assembly for the suborbital research spaceplane."""
@@ -58,6 +59,20 @@ class Spaceplane(Base):
     k_tank:           float = Input(0.10,  validator=Positive())
 
     popup_warnings: bool = Input(False)
+
+    # ── Wing aerodynamics / structure ────────────────────────────────────
+    # These can be overridden in the side-panel.
+    # fus_L_fus and fus_R_fus are NOT inputs here — they are wired live
+    # from self.fuselage in the wing @Part below.
+    wing_mission_q_max = Input(50e3,  doc='Max dynamic pressure [Pa] for wing sizing')
+    wing_mission_M_max = Input(3.5,   doc='Max Mach number for wing sizing')
+    wing_MTOW          = Input(200.0, doc='MTOW estimate [kg] for wing sizing')
+    wing_AIRFOIL_TC    = Input(0.05,  doc='Aerofoil t/c ratio')
+    wing_Lambda_LE_deg = Input(60.0,  doc='Leading-edge sweep [deg]')
+    wing_AR            = Input(2.5,   doc='Wing aspect ratio')
+    wing_lambda_t      = Input(0.35,  doc='Wing taper ratio')
+    wing_N_DESIGN      = Input(3.0,   doc='Design load factor')
+    wing_SM_TARGET     = Input(0.05,  doc='Static-margin target (fraction of MAC)')
 
     # ── Derived sizing ────────────────────────────────────────────────
 
@@ -139,6 +154,70 @@ class Spaceplane(Base):
             engine_exit_diameter=self.engine_exit_diameter,
             n_nose_sects=self.n_nose_sects,
             popup_warnings=self.popup_warnings,
+        )
+
+    # ── Wing coupling — live references to fuselage geometry ─────────────
+
+    @Attribute
+    def _wing_x_cg(self):
+        """
+        Longitudinal CoM [m] used to position the wing via the
+        static-margin equation.  Built from the fuselage zone midpoints
+        and the propulsion system gross mass.
+
+        Contributors (all read from live fuselage/propulsion attributes):
+          fuselage structure  ~ gross_mass * 0.25  @ L/2
+          payload             @ midpoint of payload bay
+          avionics            @ midpoint of avionics bay
+          propellant + engine @ midpoint of propulsion bay
+
+        Mass fractions are first-pass seeds; replaced by weight_cg.py.
+        """
+        f = self.fuselage
+        p = self.propulsion
+        m_total = p.gross_mass
+        # Structural shell: 25 % of gross mass, CoM at fuselage half-length
+        m_struct = 0.25 * m_total
+        x_struct = f.total_length / 2.0
+        # Payload: from payload_mass Input, CoM at payload bay midpoint
+        m_pay    = self.payload_mass
+        x_pay    = (f.x_payload_bay_start
+                    + f.payload_bay.required_longitudinal / 2.0)
+        # Avionics: fixed 3 kg seed, CoM at avionics bay midpoint
+        m_avi    = 3.0
+        x_avi    = f.x_avionics_start + f.avionics.total_bay_length / 2.0
+        # Propellant + engine: remainder, CoM at propulsion bay midpoint
+        m_prop   = m_total - m_struct - m_pay - m_avi
+        x_prop   = (f.x_propulsion_bay_start
+                    + f.propulsion_bay_length / 2.0)
+        return (m_struct * x_struct + m_pay * x_pay
+                + m_avi * x_avi + m_prop * x_prop) / m_total
+
+    # ── Wing Part ─────────────────────────────────────────────────────
+
+    @Part
+    def wing(self):
+        """
+        Trapezoidal delta wing.  Key couplings (all live, no hardcoding):
+          fus_L_fus  <- fuselage.total_length   (positions wing via SM eq.)
+          fus_R_fus  <- fuselage.outer_diameter / 2  (roots at skin)
+          x_cg       <- _wing_x_cg              (weighted CoM of vehicle)
+        """
+        return Wing(
+            label          = 'Wing',
+            mission_q_max  = self.wing_mission_q_max,
+            mission_M_max  = self.wing_mission_M_max,
+            mission_MTOW   = self.wing_MTOW,
+            x_cg           = self._wing_x_cg,
+            fus_L_fus      = self.fuselage.total_length,
+            fus_R_fus      = self.fuselage.outer_diameter / 2.0,
+            AIRFOIL_TC     = self.wing_AIRFOIL_TC,
+            Lambda_LE_deg  = self.wing_Lambda_LE_deg,
+            AR             = self.wing_AR,
+            lambda_t       = self.wing_lambda_t,
+            N_DESIGN       = self.wing_N_DESIGN,
+            SM_TARGET      = self.wing_SM_TARGET,
+            G0             = 9.807,
         )
 
     # ── Summary ───────────────────────────────────────────────────────
