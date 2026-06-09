@@ -10,11 +10,7 @@ Geometry is built from three clean sub-objects:
 
 Interior reference boxes (not structural):
     payload_bay_box  - red,    CubeSat standard envelope
-    avionics_bay_box - yellow, exact user-dimension box
-
-Engineering knowledge:
-    Vos, Hoogreef, Zandbergen - TU Delft fuselage design slides (2025)
-    Von Karman-Haack: minimum-wave-drag body of revolution
+    avionics_bay_box - yellow, exact dimension box
 
 Part of Team 24 KBE Assignment - Spaceplane conceptual design tool.
 """
@@ -42,7 +38,7 @@ def generate_warning(header: str, msg: str):
 
 
 # ---------------------------------------------------------------------------
-# CubeSat standard dimensions  (ECSS-E-ST-10-04C / CDS Rev 14)
+# CubeSat standard dimensions
 # ---------------------------------------------------------------------------
 
 CUBESAT_STANDARDS = {
@@ -249,7 +245,7 @@ class StandardPayloadBay(Base):
 # ---------------------------------------------------------------------------
 
 class AvionicsBay(Base):
-    """Avionics bay - exact user-supplied box dimensions, no clearance logic."""
+    """Avionics bay - exact box dimensions given in informal engineering model, no clearance logic."""
 
     avionics_box_length: float = Input(0.150, validator=Positive())
     avionics_box_width:  float = Input(0.120, validator=Positive())
@@ -287,7 +283,6 @@ class Fuselage(Base):
         downstream x-positions and total_length automatically.
 
     Soft-rule warnings on slenderness and fineness ratios.
-    Reference: Vos et al. TU Delft slides 2025
     """
 
     # --- Payload inputs exposed at top level ---
@@ -305,7 +300,7 @@ class Fuselage(Base):
     min_inner_diameter:    float = Input(0.150)
     nose_fineness:         float = Input(1.8)
     tail_fineness:         float = Input(2.5)
-    engine_exit_diameter:  float = Input(0.40, validator=Positive())
+    engine_exit_diameter:  float = Input(0.30, validator=Positive())
     n_nose_sects:          int   = Input(8)
     popup_warnings:        bool  = Input(False)
 
@@ -354,12 +349,12 @@ class Fuselage(Base):
 
     @Attribute
     def nose_length(self):
-        """L_nose = nose_fineness x D_outer  [Vos Slide 57]"""
+        """L_nose = nose_fineness x D_outer"""
         return self.nose_fineness * self.outer_diameter
 
     @Attribute
     def tail_length(self):
-        """L_tail = tail_fineness x D_outer  [Vos Slide 56]"""
+        """L_tail = tail_fineness x D_outer"""
         return self.tail_fineness * self.outer_diameter
 
     @Attribute
@@ -437,6 +432,8 @@ class Fuselage(Base):
                 generate_warning("Slenderness ratio", msg)
         return sr
 
+
+    #next two functions not needed unless nose and tail fineness are user inputs
     @Attribute
     def checked_nose_fineness(self):
         if self.nose_fineness < 1.5:
@@ -600,7 +597,7 @@ if __name__ == "__main__":
         min_inner_diameter=0.100,
         nose_fineness=1.8,
         tail_fineness=1.3,
-        engine_exit_diameter=0.200,
+        engine_exit_diameter=0.443,
         n_nose_sects=8,
         min_slenderness=12.0,
         popup_warnings=False,
