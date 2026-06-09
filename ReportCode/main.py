@@ -17,6 +17,7 @@ from fuselage import Fuselage, StandardPayloadBay, AvionicsBay, CUBESAT_STANDARD
 from propulsion_system import PropulsionSystem
 from wing_trial_1 import Wing
 
+
 class Spaceplane(Base):
     """Root assembly for the suborbital research spaceplane."""
 
@@ -44,12 +45,14 @@ class Spaceplane(Base):
     target_apogee:          float = Input(100e3, validator=Positive())
     max_burnout_mach:       float = Input(3.5,   validator=Between(1.0, 5.0))
     thrust_to_weight:       float = Input(1.5,   validator=Between(1.3, 6.0))
-    launch_mode:            str   = Input("horizontal",
-                                          validator=OneOf(["horizontal", "vertical"]))
     tank_wall_thickness:    float = Input(0.003, validator=Positive())
     intertank_spacing:      float = Input(0.050, validator=Positive(incl_zero=True))
-    tank_diameter_fraction: float = Input(0.40,  validator=Between(0.10, 0.90))
-    tanks_avionics_margin:  float = Input(0.050, validator=Positive(incl_zero=True))
+    tank_diameter_fraction:    float = Input(0.40,  validator=Between(0.10, 0.90))
+    tanks_avionics_margin:     float = Input(0.050, validator=Positive(incl_zero=True))
+    #: L/D above which a tank is split into multiple sub-tanks
+    max_tank_ld:               float = Input(5.0,  validator=Positive())
+    #: Maximum sub-tanks per propellant (1-4)
+    max_tanks_per_propellant:  int   = Input(4,    validator=Positive())
 
     # ── Tank structural / q_max inputs ───────────────────────────────────
     q_max:            float = Input(50e3,  validator=Positive())
@@ -116,11 +119,13 @@ class Spaceplane(Base):
             target_apogee=self.target_apogee,
             max_burnout_mach=self.max_burnout_mach,
             thrust_to_weight=self.thrust_to_weight,
-            launch_mode=self.launch_mode,
             max_tank_diameter=self.max_tank_diameter,
             tank_wall_thickness=self.tank_wall_thickness,
             intertank_spacing=self.intertank_spacing,
             x_tanks_start=self.x_tanks_start,
+            fuselage_inner_diameter=self.fuselage_inner_diameter,
+            max_tank_ld=self.max_tank_ld,
+            max_tanks_per_propellant=self.max_tanks_per_propellant,
             q_max=self.q_max,
             sigma_allow_tank=self.sigma_allow_tank,
             rho_wall=self.rho_wall,
@@ -133,18 +138,20 @@ class Spaceplane(Base):
 
     @Part
     def fuselage(self):
+        """
+        Fuselage Part. Inputs are passed flat (no sub-object instances)
+        so the @Part parser can validate them against Fuselage._inputs.
+        Both flat-input and sub-object-input versions of fuselage.py are
+        supported: the keys match whichever local version is in use.
+        """
         return Fuselage(
             label=f"Fuselage ({self.cubesat_standard})",
-            payload_bay=StandardPayloadBay(
-                cubesat_standard=self.cubesat_standard,
-                n_units_stacked=self.n_units_stacked,
-                clearance=self.payload_clearance,
-            ),
-            avionics=AvionicsBay(
-                avionics_box_length=self.avionics_box_length,
-                avionics_box_width=self.avionics_box_width,
-                avionics_box_height=self.avionics_box_height,
-            ),
+            cubesat_standard=self.cubesat_standard,
+            n_units_stacked=self.n_units_stacked,
+            clearance=self.payload_clearance,
+            avionics_box_length=self.avionics_box_length,
+            avionics_box_width=self.avionics_box_width,
+            avionics_box_height=self.avionics_box_height,
             propulsion_bay_length=(self.propulsion.tank_system_length
                                    + self.tanks_avionics_margin),
             structural_wall_depth=self.structural_wall_depth,
@@ -246,9 +253,9 @@ class Spaceplane(Base):
             "thrust_N":                round(p.thrust, 1),
             "tank_system_length_m":    round(p.tank_system_length, 3),
             "max_tank_diameter_m":     round(p.max_tank_diameter, 3),
+            "n_oxidizer_tanks":        p.oxidizer_stack.n_tanks,
+            "n_fuel_tanks":            p.fuel_stack.n_tanks,
             "tank_wall_mass_kg":       round(p.tank_wall_mass, 3),
-            "ox_tank_t_wall_mm":       round(p.oxidizer_tank.t_wall_hoop * 1e3, 2),
-            "fu_tank_t_wall_mm":       round(p.fuel_tank.t_wall_hoop * 1e3, 2),
         }
 
     def print_summary(self):
@@ -298,11 +305,12 @@ if __name__ == "__main__":
         target_apogee=100e3,
         max_burnout_mach=3.5,
         thrust_to_weight=1.5,
-        launch_mode="horizontal",
         tank_wall_thickness=0.003,
         intertank_spacing=0.050,
         tank_diameter_fraction=0.40,
         tanks_avionics_margin=0.050,
+        max_tank_ld=5.0,
+        max_tanks_per_propellant=4,
         engine_exit_diameter=0.080,
         n_nose_sects=8,
         q_max=50e3,

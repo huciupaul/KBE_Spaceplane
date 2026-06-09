@@ -10,11 +10,7 @@ Geometry is built from three clean sub-objects:
 
 Interior reference boxes (not structural):
     payload_bay_box  - red,    CubeSat standard envelope
-    avionics_bay_box - yellow, exact user-dimension box
-
-Engineering knowledge:
-    Vos, Hoogreef, Zandbergen - TU Delft fuselage design slides (2025)
-    Von Karman-Haack: minimum-wave-drag body of revolution
+    avionics_bay_box - yellow, exact dimension box
 
 Part of Team 24 KBE Assignment - Spaceplane conceptual design tool.
 """
@@ -42,7 +38,7 @@ def generate_warning(header: str, msg: str):
 
 
 # ---------------------------------------------------------------------------
-# CubeSat standard dimensions  (ECSS-E-ST-10-04C / CDS Rev 14)
+# CubeSat standard dimensions
 # ---------------------------------------------------------------------------
 
 CUBESAT_STANDARDS = {
@@ -249,7 +245,7 @@ class StandardPayloadBay(Base):
 # ---------------------------------------------------------------------------
 
 class AvionicsBay(Base):
-    """Avionics bay - exact user-supplied box dimensions, no clearance logic."""
+    """Avionics bay - exact box dimensions given in informal engineering model, no clearance logic."""
 
     avionics_box_length: float = Input(0.150, validator=Positive())
     avionics_box_width:  float = Input(0.120, validator=Positive())
@@ -280,20 +276,56 @@ class Fuselage(Base):
     Section layout (nose tip to tail tip):
         [nose cone] [payload bay] [avionics bay] [propulsion bay] [boat-tail]
 
+    Slenderness enforcement:
+        If L/D < min_slenderness (default 12), the barrel is automatically
+        extended via slenderness_barrel_extension so that L/D >= min_slenderness.
+        The extension is added to cylindrical_length and propagates to all
+        downstream x-positions and total_length automatically.
+
     Soft-rule warnings on slenderness and fineness ratios.
-    Reference: Vos et al. TU Delft slides 2025
     """
 
-    payload_bay:           StandardPayloadBay = Input(StandardPayloadBay())
-    avionics:              AvionicsBay        = Input(AvionicsBay())
-    propulsion_bay_length: float              = Input(1.20, validator=GreaterThan(0))
-    structural_wall_depth: float              = Input(0.050, validator=Between(0.02, 0.15))
-    min_inner_diameter:    float              = Input(0.30)
-    nose_fineness:         float              = Input(1.8)
-    tail_fineness:         float              = Input(2.5)
-    engine_exit_diameter:  float              = Input(0.40, validator=Positive())
-    n_nose_sects:          int                = Input(8)
-    popup_warnings:        bool               = Input(False)
+    # --- Payload inputs exposed at top level ---
+    cubesat_standard: str = Input("6U")
+    n_units_stacked: int = Input(1)
+    clearance: float = Input(0.030)
+
+    # --- Avionics inputs exposed at top level ---
+    avionics_box_length: float = Input(0.150)
+    avionics_box_width:  float = Input(0.120)
+    avionics_box_height: float = Input(0.080)
+
+    propulsion_bay_length: float = Input(1.20, validator=GreaterThan(0))
+    structural_wall_depth: float = Input(0.050, validator=Between(0.02, 0.15))
+    min_inner_diameter:    float = Input(0.150)
+    nose_fineness:         float = Input(1.8)
+    tail_fineness:         float = Input(2.5)
+    engine_exit_diameter:  float = Input(0.30, validator=Positive())
+    n_nose_sects:          int   = Input(8)
+    popup_warnings:        bool  = Input(False)
+
+    #: Minimum allowable slenderness ratio L/D. Barrel is extended
+    #: automatically if the natural geometry falls below this value.
+    #: Reference: Vos Slide 12 — transonic spaceplane target 12–20.
+    min_slenderness: float = Input(12.0, validator=Between(1.0, 30.0))
+
+    # ── Sub-parts ─────────────────────────────────────────────────────
+
+    @Part
+    def payload_bay(self):
+        return StandardPayloadBay(
+            cubesat_standard=self.cubesat_standard,
+            n_units_stacked=self.n_units_stacked,
+            clearance=self.clearance,
+        )
+
+    @Part
+    def avionics(self):
+        return AvionicsBay(
+            avionics_box_length=self.avionics_box_length,
+            avionics_box_width=self.avionics_box_width,
+            avionics_box_height=self.avionics_box_height,
+        )
 
     # ── Diameters ─────────────────────────────────────────────────────
 
@@ -317,43 +349,91 @@ class Fuselage(Base):
 
     @Attribute
     def nose_length(self):
-        """L_nose = nose_fineness x D_outer  [Vos Slide 57]"""
+        """L_nose = nose_fineness x D_outer"""
         return self.nose_fineness * self.outer_diameter
 
     @Attribute
-    def cylindrical_length(self):
+    def tail_length(self):
+        """L_tail = tail_fineness x D_outer"""
+        return self.tail_fineness * self.outer_diameter
+
+    @Attribute
+    def _base_cylindrical_length(self):
+        """
+        Cylindrical barrel length from functional bays only, before any
+        slenderness correction is applied.
+        """
         return (self.payload_bay.required_longitudinal
                 + self.avionics.total_bay_length
                 + self.propulsion_bay_length)
 
     @Attribute
-    def tail_length(self):
-        """L_tail = tail_fineness x D_outer  [Vos Slide 56]"""
-        return self.tail_fineness * self.outer_diameter
+    def slenderness_barrel_extension(self):
+        """
+        Extra barrel length [m] added to meet min_slenderness (default 12).
+
+        Derivation:
+            L_total = nose + (cyl_base + ext) + tail
+            L/D >= min_slenderness
+            => ext >= min_slenderness * D_outer - nose - cyl_base - tail
+            => ext = max(0, min_slenderness * D_outer - nose - cyl_base - tail)
+
+        When the natural geometry already meets the requirement, ext = 0
+        and nothing changes. When it does not, the barrel grows just enough
+        to hit exactly L/D = min_slenderness.
+
+        This extra length is added inside the propulsion bay — it represents
+        additional structural / margin volume aft of the tank stack, which
+        is physically reasonable. The propulsion_bay_length Input is NOT
+        modified; instead the extension sits transparently inside the barrel.
+        """
+        natural_total = (self.nose_length
+                         + self._base_cylindrical_length
+                         + self.tail_length)
+        required_total = self.min_slenderness * self.outer_diameter
+        ext = max(0.0, required_total - natural_total)
+        if ext > 0.0:
+            msg = (
+                f"Slenderness ratio would be "
+                f"{natural_total / self.outer_diameter:.2f} < {self.min_slenderness}. "
+                f"Barrel extended by {ext * 1e3:.1f} mm to reach "
+                f"L/D = {self.min_slenderness:.1f}."
+            )
+            warnings.warn(msg)
+            if self.popup_warnings:
+                generate_warning("Slenderness barrel extension", msg)
+        return ext
+
+    @Attribute
+    def cylindrical_length(self):
+        """
+        Final barrel length including any slenderness extension [m].
+        = functional bays + extension to meet min_slenderness.
+        """
+        return self._base_cylindrical_length + self.slenderness_barrel_extension
 
     @Attribute
     def total_length(self):
         return self.nose_length + self.cylindrical_length + self.tail_length
 
-    # ── Soft-rule checks ──────────────────────────────────────────────
+    # ── Slenderness check (now always satisfied by construction) ──────
 
     @Attribute
     def slenderness_ratio(self):
-        """L/D - target 20-25 for transonic spaceplane [Vos Slide 12]."""
+        """
+        Actual L/D after barrel extension. Always >= min_slenderness.
+        A warning is still issued above 20 (bending loads critical).
+        """
         sr = self.total_length / self.outer_diameter
-        if sr < 20.0:
-            msg = (f"Slenderness ratio {sr:.2f} < 20 - "
-                   "below transonic target (20-25), pressure drag elevated.")
-            warnings.warn(msg)
-            if self.popup_warnings:
-                generate_warning("Slenderness ratio", msg)
-        elif sr > 25.0:
-            msg = f"Slenderness ratio {sr:.2f} > 25 - bending loads critical."
+        if sr > 20.0:
+            msg = f"Slenderness ratio {sr:.2f} > 20 - bending loads critical."
             warnings.warn(msg)
             if self.popup_warnings:
                 generate_warning("Slenderness ratio", msg)
         return sr
 
+
+    #next two functions not needed unless nose and tail fineness are user inputs
     @Attribute
     def checked_nose_fineness(self):
         if self.nose_fineness < 1.5:
@@ -471,19 +551,21 @@ class Fuselage(Base):
     @Attribute
     def summary(self):
         return {
-            "inner_diameter_m":         round(self.inner_diameter, 3),
-            "outer_diameter_m":         round(self.outer_diameter, 3),
-            "nose_length_m":            round(self.nose_length, 3),
-            "cylindrical_length_m":     round(self.cylindrical_length, 3),
-            "tail_length_m":            round(self.tail_length, 3),
-            "total_length_m":           round(self.total_length, 3),
-            "slenderness_ratio":        round(self.slenderness_ratio, 2),
-            "cubesat_standard":         self.payload_bay.cubesat_standard,
-            "payload_bay_volume_m3":    round(self.payload_bay.required_volume, 4),
-            "x_payload_bay_start_m":    round(self.x_payload_bay_start, 3),
-            "x_avionics_start_m":       round(self.x_avionics_start, 3),
-            "x_propulsion_bay_start_m": round(self.x_propulsion_bay_start, 3),
-            "x_tail_start_m":           round(self.x_tail_start, 3),
+            "inner_diameter_m":              round(self.inner_diameter, 3),
+            "outer_diameter_m":              round(self.outer_diameter, 3),
+            "nose_length_m":                 round(self.nose_length, 3),
+            "cylindrical_length_m":          round(self.cylindrical_length, 3),
+            "slenderness_barrel_ext_mm":     round(self.slenderness_barrel_extension * 1e3, 1),
+            "tail_length_m":                 round(self.tail_length, 3),
+            "total_length_m":                round(self.total_length, 3),
+            "slenderness_ratio":             round(self.slenderness_ratio, 2),
+            "min_slenderness":               self.min_slenderness,
+            "cubesat_standard":              self.payload_bay.cubesat_standard,
+            "payload_bay_volume_m3":         round(self.payload_bay.required_volume, 4),
+            "x_payload_bay_start_m":         round(self.x_payload_bay_start, 3),
+            "x_avionics_start_m":            round(self.x_avionics_start, 3),
+            "x_propulsion_bay_start_m":      round(self.x_propulsion_bay_start, 3),
+            "x_tail_start_m":                round(self.x_tail_start, 3),
         }
 
     def print_summary(self):
@@ -504,23 +586,20 @@ if __name__ == "__main__":
 
     fu = Fuselage(
         label="Spaceplane Fuselage (6U CubeSat)",
-        payload_bay=StandardPayloadBay(
-            cubesat_standard="6U",
-            n_units_stacked=1,
-            clearance=0.030,
-        ),
-        avionics=AvionicsBay(
-            avionics_box_length=0.150,
-            avionics_box_width=0.120,
-            avionics_box_height=0.080,
-        ),
+        cubesat_standard="1U",
+        n_units_stacked=1,
+        clearance=0.030,
+        avionics_box_length=0.150,
+        avionics_box_width=0.120,
+        avionics_box_height=0.080,
         propulsion_bay_length=1.20,
         structural_wall_depth=0.050,
         min_inner_diameter=0.100,
         nose_fineness=1.8,
         tail_fineness=1.3,
-        engine_exit_diameter=0.200,
+        engine_exit_diameter=0.443,
         n_nose_sects=8,
+        min_slenderness=12.0,
         popup_warnings=False,
     )
 
