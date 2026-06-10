@@ -6,16 +6,22 @@ Top-level integration module for the suborbital research spaceplane KBE applicat
 Sizing loop:
     PropulsionSystem.tank_system_length  →  Fuselage.propulsion_bay_length
 """
-
+from math import radians
 from parapy.core import *
 from parapy.core.validate import *
+from parapy.geom import (GeomBase, translate, rotate, ProjectedCurve,
+                         MirroredShape, Rectangle, SubtractedSolid, Subtracted,
+                         Fused, FusedSolid, rotate90,XOY)
 
 from fuselage import Fuselage, StandardPayloadBay, CUBESAT_STANDARDS
 from propulsion_system import PropulsionSystem
-from wing_trial_1 import Wing
+from wing import Wing
+from tail import TailSection
+from ref_frame import Frame
 
 
-class Spaceplane(Base):
+
+class Spaceplane(GeomBase):
     """Root assembly for the suborbital research spaceplane."""
 
     # ── Payload ───────────────────────────────────────────────────────
@@ -58,21 +64,39 @@ class Spaceplane(Base):
     factor_of_safety: float = Input(1.5,   validator=Between(1.0, 3.0))
     k_tank:           float = Input(0.10,  validator=Positive())
 
-    popup_warnings: bool = Input(False)
+    # ─────────────────────── Wing ───────────────────────────────────
+    airfoil_root_name: str = Input("whitcomb")
+    airfoil_kink_name: str = Input("whitcomb")
+    airfoil_tip_name: str = Input("whitcomb")
+    w_c_root: float = Input()
+    w_c_kink: float = Input()
+    w_c_tip: float = Input()
 
-    # ── Wing aerodynamics / structure ────────────────────────────────────
-    # These can be overridden in the side-panel.
-    # fus_L_fus and fus_R_fus are NOT inputs here — they are wired live
-    # from self.fuselage in the wing @Part below.
-    wing_mission_q_max = Input(50e3,  doc='Max dynamic pressure [Pa] for wing sizing')
-    wing_mission_M_max = Input(3.5,   doc='Max Mach number for wing sizing')
-    wing_MTOW          = Input(200.0, doc='MTOW estimate [kg] for wing sizing')
-    wing_AIRFOIL_TC    = Input(0.05,  doc='Aerofoil t/c ratio')
-    wing_Lambda_LE_deg = Input(60.0,  doc='Leading-edge sweep [deg]')
-    wing_AR            = Input(2.5,   doc='Wing aspect ratio')
-    wing_lambda_t      = Input(0.35,  doc='Wing taper ratio')
-    wing_N_DESIGN      = Input(3.0,   doc='Design load factor')
-    wing_SM_TARGET     = Input(0.05,  doc='Static-margin target (fraction of MAC)')
+    w_t_factor_root: float = Input(1)
+    w_t_factor_kink: float = Input(1)
+    w_t_factor_tip: float = Input(1)
+
+    w_semi_span: float = Input()
+    w_kink_span: float = Input()
+    w_sweep_kink: float = Input(0)  # at leading edge, in degrees
+    w_sweep_tip: float = Input(0)
+    w_twist: float = Input(0)
+    w_dihedral: float = Input(0)
+
+    w_pos_rel_x: float = Input(0.4) # wing root LE position as fraction of fuselage length
+    w_pos_rel_z: float = Input(0.8) # wing root LE position as fraction of fuselage radius, vertically
+
+    # ─────────────────────Tail sections ───────────────────────────────────
+
+    vt_long: float = Input(0.8) # VT root LE position as fraction of fuselage length
+    vt_taper: float = Input(0.4)
+    vt_chord_perc: float = Input(0.75)
+
+
+
+
+    mesh_deflection: float = Input(1e-4)
+    popup_warnings: bool = Input(False)
 
     # ── Derived sizing ────────────────────────────────────────────────
 
@@ -160,69 +184,76 @@ class Spaceplane(Base):
             popup_warnings=self.popup_warnings,
         )
 
-    # ── Wing coupling — live references to fuselage geometry ─────────────
+    # ── Wing Part ─────────────────────────────────────────────────
 
-    @Attribute
-    def _wing_x_cg(self):
-        """
-        Longitudinal CoM [m] used to position the wing via the
-        static-margin equation.  Built from the fuselage zone midpoints
-        and the propulsion system gross mass.
-
-        Contributors (all read from live fuselage/propulsion attributes):
-          fuselage structure  ~ gross_mass * 0.25  @ L/2
-          payload             @ midpoint of payload bay
-          avionics            @ midpoint of avionics bay
-          propellant + engine @ midpoint of propulsion bay
-
-        Mass fractions are first-pass seeds; replaced by weight_cg.py.
-        """
-        f = self.fuselage
-        p = self.propulsion
-        m_total = p.gross_mass
-        # Structural shell: 25 % of gross mass, CoM at fuselage half-length
-        m_struct = 0.25 * m_total
-        x_struct = f.total_length / 2.0
-        # Payload: from payload_mass Input, CoM at payload bay midpoint
-        m_pay    = self.payload_mass
-        x_pay    = (f.x_payload_bay_start
-                    + f.payload_bay.required_longitudinal / 2.0)
-        # Avionics: fixed 3 kg seed, CoM at avionics bay midpoint
-        m_avi    = 3.0
-        x_avi    = f.x_avionics_start + f.avionics.total_bay_length / 2.0
-        # Propellant + engine: remainder, CoM at propulsion bay midpoint
-        m_prop   = m_total - m_struct - m_pay - m_avi
-        x_prop   = (f.x_propulsion_bay_start
-                    + f.propulsion_bay_length / 2.0)
-        return (m_struct * x_struct + m_pay * x_pay
-                + m_avi * x_avi + m_prop * x_prop) / m_total
-
-    # ── Wing Part ─────────────────────────────────────────────────────
+    @Part
+    def aircraft_frame(self):
+        """This helps visualise the wing local reference frame"""
+        return Frame(pos=self.position)
 
     @Part
     def wing(self):
-        """
-        Trapezoidal delta wing.  Key couplings (all live, no hardcoding):
-          fus_L_fus  <- fuselage.total_length   (positions wing via SM eq.)
-          fus_R_fus  <- fuselage.outer_diameter / 2  (roots at skin)
-          x_cg       <- _wing_x_cg              (weighted CoM of vehicle)
-        """
-        return Wing(
-            label          = 'Wing',
-            mission_q_max  = self.wing_mission_q_max,
-            mission_M_max  = self.wing_mission_M_max,
-            mission_MTOW   = self.wing_MTOW,
-            x_cg           = self._wing_x_cg,
-            fus_L_fus      = self.fuselage.total_length,
-            fus_R_fus      = self.fuselage.outer_diameter / 2.0,
-            AIRFOIL_TC     = self.wing_AIRFOIL_TC,
-            Lambda_LE_deg  = self.wing_Lambda_LE_deg,
-            AR             = self.wing_AR,
-            lambda_t       = self.wing_lambda_t,
-            N_DESIGN       = self.wing_N_DESIGN,
-            SM_TARGET      = self.wing_SM_TARGET,
-            G0             = 9.807,
-        )
+        return Wing(pass_down=['airfoil_root_name', 'airfoil_kink_name', 'airfoil_tip_name'],
+                    semi_span=self.w_semi_span,
+                    kink_span=self.w_kink_span,
+                    sweep_kink=self.w_sweep_kink,
+                    sweep_tip=self.w_sweep_tip,
+                    twist=self.w_twist,
+                    dihedral=self.w_dihedral,
+                    c_root=self.w_c_root,
+                    c_kink=self.w_c_kink,
+                    c_tip=self.w_c_tip,
+                    t_factor_root=self.w_t_factor_root,
+                    t_factor_kink=self.w_t_factor_kink,
+                    t_factor_tip=self.w_t_factor_tip,
+                    position=translate(self.position,
+                                       'x', self.w_pos_rel_x * self.fuselage.total_length,
+                                       'z', self.w_pos_rel_z * -self.fuselage.outer_diameter/2),
+                    mesh_deflection=self.mesh_deflection)
+
+    # # ── VT and HT parts ───────────────────────────────────────────────────────
+
+    @Part
+    def vert_tail(self):
+        return TailSection(c_root=self.w_c_root * self.vt_chord_perc,
+                           c_tip=self.w_c_root * self.vt_taper,
+                           airfoil_root_name="whitcomb",
+                           airfoil_tip_name="whitcomb",
+                           t_factor_root=0.9 * self.w_t_factor_root,
+                           t_factor_tip=0.8 * self.w_t_factor_tip,
+                           semi_span=self.w_semi_span / 3,
+                           sweep=45,
+                           twist=0,
+                           position=rotate(translate(self.position,
+                                                     "x", self.vt_long * self.fuselage.total_length,
+                                                     "z", self.fuselage.outer_diameter/2 * 0.7),
+                                           "x", radians(90)),
+                           mesh_deflection=self.mesh_deflection)
+
+    @Part
+    def h_tail_right(self):
+        return TailSection(c_root=self.w_c_root / 1.5,
+                           c_tip=self.w_c_tip / 2,
+                           airfoil_root_name="whitcomb",
+                           airfoil_tip_name="whitcomb",
+                           t_factor_root=0.9 * self.w_t_factor_root,
+                           t_factor_tip=0.7 * child.t_factor_root,
+                           semi_span=self.w_semi_span / 2.5,
+                           sweep=self.w_sweep_tip * 1.2,
+                           twist=0,
+                           position=rotate(translate
+                                           (self.position, "x", self.fuselage.total_length - self.w_c_root),
+                                           "x", radians(self.w_dihedral + 4)),
+                           mesh_deflection=self.mesh_deflection)
+
+    @Part
+    def h_tail_left(self):
+        return MirroredShape(shape_in=self.h_tail_right,
+                             reference_point=self.position,
+                             # Two vectors and a point to define the mirror plane
+                             vector1=self.position.Vz,
+                             vector2=self.position.Vx,
+                             mesh_deflection=self.mesh_deflection)
 
     # ── Summary ───────────────────────────────────────────────────────
 
@@ -315,6 +346,25 @@ if __name__ == "__main__":
         rho_wall=2840.0,
         factor_of_safety=1.5,
         k_tank=0.10,
+
+        # Wing
+        w_semi_span=5,
+        w_kink_span=2,
+        w_sweep_kink=20,
+        w_sweep_tip=25,
+        w_twist=0,
+        w_dihedral=4,
+        w_c_root=1.5,
+        w_c_kink=1,
+        w_c_tip=0.5,
+        w_t_factor_root=1,
+        w_t_factor_kink=0.75,
+        w_t_factor_tip=0.5,
+        airfoil_root_name='whitcomb',
+        airfoil_kink_name='whitcomb',
+        airfoil_tip_name='whitcomb',
+        mesh_deflection=1e-5,
+        #position=XOY.rotate(x=0.7).translate(x=5, y=10)
     )
 
     vehicle.print_summary()

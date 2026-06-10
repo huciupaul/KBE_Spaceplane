@@ -19,9 +19,10 @@ from parapy.geom import (GeomBase, translate, rotate, ProjectedCurve,
                          Fused, FusedSolid, rotate90)
 from parapy.core import Input, Attribute, Part, child, action
 from liftingsurface import LiftingSurface  # note this is not the same as wing class defined in tutorial 5
-from fuselage import Fuselage
+from fuselage_tutorial import Fuselage
 from wing import Wing
 from ref_frame import Frame
+from tail import TailSection
 
 
 maindir = os.path.dirname(__file__)
@@ -35,17 +36,22 @@ class Aircraft(GeomBase):
 
     # airfoils default to pre-defined Whitcomb
     airfoil_root_name: str = Input("whitcomb")
+    airfoil_kink_name: str = Input("whitcomb")
     airfoil_tip_name: str = Input("whitcomb")
     w_c_root: float = Input()
+    w_c_kink: float = Input()
     w_c_tip: float = Input()
 
     #: to reduce/increase the thickness of the airfoil from the .dat file
     w_t_factor_root: float = Input(1)
+    w_t_factor_kink: float = Input(1)
     w_t_factor_tip: float = Input(1)
     # Default: Uses airfoils as provided, no change to thickness
 
     w_semi_span: float = Input()
-    w_sweep: float = Input(0)  # at leading edge, in degrees
+    w_kink_span: float = Input()
+    w_sweep_kink: float = Input(0)  # at leading edge, in degrees
+    w_sweep_tip: float = Input(0)
     w_twist: float = Input(0)  # tip airfoil twist angle, measured around leading edge, in degrees
 
     w_dihedral: float = Input(0)
@@ -59,6 +65,7 @@ class Aircraft(GeomBase):
     #: longitudinal position of the vertical tail, as % of fus length
     vt_long: float = Input(0.8)
     vt_taper: float = Input(0.4)
+    vt_chord_perc: float = Input(0.7)
     #? Wait a second: How are the vertical tail root and tip chord length determined?
 
     mesh_deflection: float = Input(1e-4)
@@ -86,14 +93,18 @@ class Aircraft(GeomBase):
 
     @Part
     def wing(self):
-        return Wing(pass_down=['airfoil_root_name', 'airfoil_tip_name'],
+        return Wing(pass_down=['airfoil_root_name', 'airfoil_kink_name' 'airfoil_tip_name'],
                     semi_span=self.w_semi_span,
-                    sweep=self.w_sweep,
+                    kink_span=self.w_kink_span,
+                    sweep_kink=self.w_sweep_kink,
+                    sweep_tip=self.w_sweep_tip,
                     twist=self.w_twist,
                     dihedral=self.w_dihedral,
                     c_root=self.w_c_root,
+                    c_kink=self.w_c_kink,
                     c_tip=self.w_c_tip,
                     t_factor_root=self.w_t_factor_root,
+                    t_factor_kink=self.w_t_factor_kink,
                     t_factor_tip=self.w_t_factor_tip,
                     position=translate(self.position,
                                        'x', self.w_pos_rel_x * self.fu_length,
@@ -104,10 +115,10 @@ class Aircraft(GeomBase):
 
     @Part
     def vert_tail(self):
-        return LiftingSurface(c_root=self.w_c_root,
+        return TailSection(c_root=self.w_c_root * self.vt_chord_perc,
                               c_tip=self.w_c_root * self.vt_taper,
-                              airfoil_root_name="simm_airfoil",
-                              airfoil_tip_name="simm_airfoil",
+                              airfoil_root_name="whitcomb",
+                              airfoil_tip_name="whitcomb",
                               t_factor_root=0.9 * self.w_t_factor_root,
                               t_factor_tip=0.8 * self.w_t_factor_tip,
                               semi_span=self.w_semi_span / 3,
@@ -121,14 +132,14 @@ class Aircraft(GeomBase):
 
     @Part
     def h_tail_right(self):
-        return LiftingSurface(c_root=self.w_c_root / 1.5,
+        return TailSection(c_root=self.w_c_root / 1.5,
                               c_tip=self.w_c_tip / 2,
-                              airfoil_root_name="simm_airfoil",
-                              airfoil_tip_name="simm_airfoil",
+                              airfoil_root_name="whitcomb",
+                              airfoil_tip_name="whitcomb",
                               t_factor_root=0.9 * self.w_t_factor_root,
                               t_factor_tip=0.7 * child.t_factor_root,
                               semi_span=self.w_semi_span / 2.5,
-                              sweep=self.w_sweep * 1.2,
+                              sweep=self.w_sweep_tip * 1.2,
                               twist=0,
                               position=rotate(translate
                                               (self.position, "x", self.fu_length - self.w_c_root),
@@ -210,11 +221,12 @@ if __name__ == '__main__':
                    #fu_sections=[10, 90, 100, 100, 100, 100, 100, 100, 95, 70, 10],
                    fu_length=50.65,
                    airfoil_root_name="whitcomb",
+                  airfoil_kink_name="whitcomb",
                    airfoil_tip_name="simm_airfoil",
-                   w_c_root=6., w_c_tip=2.3,
-                   w_t_factor_root=1, w_t_factor_tip=0.5,
-                   w_semi_span=27.,
-                   w_sweep=20, w_twist=-4, w_dihedral=3,
+                   w_c_root=6., w_c_kink=4, w_c_tip=2.3,
+                   w_t_factor_root=1, w_t_factor_kink=0.75, w_t_factor_tip=0.5,
+                   w_semi_span=27., w_kink_span=17,
+                   w_sweep_kink=10, w_sweep_tip=25, w_twist=-4, w_dihedral=3,
                    w_pos_rel_x=0.4, w_pos_rel_z=0.8,
                    vt_long=0.8, vt_taper=0.4,
                    # rotated to test robustness (no references to absolute coords)

@@ -84,9 +84,6 @@ class Wing(GeomBase):
                                               self.position.Vz)
 
 
-
-
-
 if __name__ == '__main__':
     from parapy.gui import display
     testwing = Wing(semi_span=19,
