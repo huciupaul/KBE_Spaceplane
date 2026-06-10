@@ -7,6 +7,7 @@ Sizing loop:
     PropulsionSystem.tank_system_length  →  Fuselage.propulsion_bay_length
 """
 from math import radians
+from mass_breakdown import plot_mass_breakdown
 from parapy.core import *
 from parapy.core.validate import *
 from parapy.geom import (GeomBase, translate, rotate, ProjectedCurve,
@@ -63,7 +64,7 @@ class Spaceplane(GeomBase):
     # Individual Masses  ───────────────────────────────────
     mass_landing_gear: float = Input(5.0, validator=Positive())
     mass_avionics: float = Input(2.5, validator=Positive())
-    mass_tail: float = Input(3.0, validator=Positive())
+    mass_tail: float = Input(8.0, validator=Positive())
     mass_wings: float = Input(20.0, validator=Positive())
 
     # ── Tank structural / q_max inputs ───────────────────────────────────
@@ -364,7 +365,7 @@ if __name__ == "__main__":
         cubesat_standard="12U",
         n_units_stacked=1,
         payload_clearance=0.030,
-        payload_mass=4.0,
+        payload_mass=10.0,
 
         # Avionics
         avionics_box_length=0.150,
@@ -418,4 +419,5 @@ if __name__ == "__main__":
     )
 
     vehicle.print_summary()
+    plot_mass_breakdown(vehicle)
     display(vehicle)
