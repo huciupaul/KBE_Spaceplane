@@ -49,6 +49,38 @@ CUBESAT_STANDARDS = {
 }
 
 
+
+# ---------------------------------------------------------------------------
+# Fuselage skin material database
+# ---------------------------------------------------------------------------
+
+FUSELAGE_MATERIALS = {
+    "Al-6061-T6": dict(
+        density=2700.0,       # kg/m³  https://asm.matweb.com
+        sigma_allow=276e6,    # Pa     yield strength
+        color="silver",
+        note="Common aerospace aluminium alloy. Good machinability.",
+    ),
+    "Al-2024-T3": dict(
+        density=2780.0,
+        sigma_allow=345e6,
+        color="gray",
+        note="Higher-strength aluminium. Used in aircraft fuselage skins.",
+    ),
+    "CFRP": dict(
+        density=1600.0,       # kg/m³  typical CFRP laminate
+        sigma_allow=600e6,    # Pa     tensile (layup-dependent)
+        color="black",
+        note="Carbon fibre reinforced polymer. Best mass fraction.",
+    ),
+    "Ti-6Al-4V": dict(
+        density=4430.0,
+        sigma_allow=880e6,
+        color="darkgray",
+        note="Titanium alloy. High temp / high stress regions.",
+    ),
+}
+
 # ---------------------------------------------------------------------------
 # Helper: circular cross-section control points
 # ---------------------------------------------------------------------------
@@ -295,6 +327,10 @@ class Fuselage(Base):
     avionics_box_width:  float = Input(0.120)
     avionics_box_height: float = Input(0.080)
 
+    fuselage_material: str = Input("Al-6061-T6",
+                                   validator=OneOf(list(FUSELAGE_MATERIALS.keys())))
+    skin_thickness: float = Input(0.002, validator=Positive())
+
     propulsion_bay_length: float = Input(1.20, validator=GreaterThan(0))
     structural_wall_depth: float = Input(0.050, validator=Between(0.02, 0.15))
     min_inner_diameter:    float = Input(0.150)
@@ -480,6 +516,79 @@ class Fuselage(Base):
     def x_tail_tip(self):
         return self.total_length
 
+    #  Material properties
+
+    @Attribute
+    def _mat(self):
+        """Material property dict for the selected fuselage_material."""
+        return FUSELAGE_MATERIALS[self.fuselage_material]
+
+    @Attribute
+    def skin_density(self):
+        """Shell material density [kg/m³]."""
+        return self._mat["density"]
+
+    @Attribute
+    def skin_color(self):
+        """Display color matching the selected material."""
+        return self._mat["color"]
+
+    # ── Structural mass ───────────────────────────────────────────────
+
+    @Attribute
+    def nose_cone_wetted_area(self):
+        """
+        Lateral surface area of the Von Karman ogive [m²].
+        Approximated as a cone with same base radius and slant height:
+            A = pi * r * sqrt(r^2 + L^2)
+        Slight overestimate (ogive is fuller than cone) - conservative.
+        """
+        r = self.outer_radius
+        return math.pi * r * math.sqrt(r ** 2 + self.nose_length ** 2)
+
+    @Attribute
+    def barrel_wetted_area(self):
+        """Lateral surface area of the cylindrical barrel [m²]."""
+        return math.pi * self.outer_diameter * self.cylindrical_length
+
+    @Attribute
+    def boat_tail_wetted_area(self):
+        """
+        Assume cylindrical barrel for simplicity
+        """
+        return math.pi * self.outer_diameter * self.tail_length
+
+    @Attribute
+    def total_wetted_area(self):
+        """Total outer surface area of the fuselage shell [m²]."""
+        return (self.nose_cone_wetted_area
+                + self.barrel_wetted_area
+                + self.boat_tail_wetted_area)
+
+    @Attribute
+    def nose_cone_mass(self):
+        """Nose cone skin mass [kg] = rho * area * thickness."""
+        return self.skin_density * self.nose_cone_wetted_area * self.skin_thickness
+
+    @Attribute
+    def barrel_mass(self):
+        """Barrel skin mass [kg]."""
+        return self.skin_density * self.barrel_wetted_area * self.skin_thickness
+
+    @Attribute
+    def boat_tail_mass(self):
+        """Boat-tail skin mass [kg]."""
+        return self.skin_density * self.boat_tail_wetted_area * self.skin_thickness
+
+    @Attribute
+    def fuselage_structural_mass(self):
+        """
+        Total fuselage shell structural mass [kg].
+        = nose_cone_mass + barrel_mass + boat_tail_mass
+        Does not include payload, avionics, propulsion, or wings.
+        """
+        return self.nose_cone_mass + self.barrel_mass + self.boat_tail_mass
+
     # ── Geometry Parts ────────────────────────────────────────────────
 
     @Part
@@ -506,7 +615,7 @@ class Fuselage(Base):
             x_start=self.x_tail_start,
             L_tail=self.tail_length,
             R_fus=self.outer_radius,
-            R_engine=0.5 * self.engine_exit_diameter,
+            R_engine=self.outer_radius,
             label="boat_tail",
         )
 
@@ -566,6 +675,18 @@ class Fuselage(Base):
             "x_avionics_start_m":            round(self.x_avionics_start, 3),
             "x_propulsion_bay_start_m":      round(self.x_propulsion_bay_start, 3),
             "x_tail_start_m":                round(self.x_tail_start, 3),
+            # ── Structural mass breakdown ─────────────────────────
+            "fuselage_material":             self.fuselage_material,
+            "skin_thickness_mm":             round(self.skin_thickness * 1e3, 2),
+            "skin_density_kg_m3":            round(self.skin_density, 1),
+            "nose_cone_wetted_area_m2":      round(self.nose_cone_wetted_area, 4),
+            "barrel_wetted_area_m2":         round(self.barrel_wetted_area, 4),
+            "boat_tail_wetted_area_m2":      round(self.boat_tail_wetted_area, 4),
+            "total_wetted_area_m2":          round(self.total_wetted_area, 4),
+            "nose_cone_mass_kg":             round(self.nose_cone_mass, 3),
+            "barrel_mass_kg":                round(self.barrel_mass, 3),
+            "boat_tail_mass_kg":             round(self.boat_tail_mass, 3),
+            "fuselage_structural_mass_kg":   round(self.fuselage_structural_mass, 3),
         }
 
     def print_summary(self):
@@ -600,6 +721,8 @@ if __name__ == "__main__":
         engine_exit_diameter=0.443,
         n_nose_sects=8,
         min_slenderness=12.0,
+        fuselage_material="Al-6061-T6",
+        skin_thickness=0.002,
         popup_warnings=False,
     )
 

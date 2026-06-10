@@ -13,7 +13,7 @@ from parapy.geom import (GeomBase, translate, rotate, ProjectedCurve,
                          MirroredShape, Rectangle, SubtractedSolid, Subtracted,
                          Fused, FusedSolid, rotate90,XOY)
 
-from fuselage import Fuselage, StandardPayloadBay, CUBESAT_STANDARDS
+from fuselage import Fuselage, StandardPayloadBay, CUBESAT_STANDARDS, FUSELAGE_MATERIALS
 from propulsion_system import PropulsionSystem
 from wing import Wing
 from tail import TailSection
@@ -41,6 +41,9 @@ class Spaceplane(GeomBase):
     tail_fineness:         float = Input(2.5)
     engine_exit_diameter:  float = Input(0.080, validator=Positive())
     n_nose_sects:          int   = Input(8)
+    fuselage_material: str = Input("Al-6061-T6",
+                                   validator=OneOf(list(FUSELAGE_MATERIALS.keys())))
+    skin_thickness: float = Input(0.002, validator=Positive())
 
     # ── Mission / propulsion ──────────────────────────────────────────
     propulsion_type:        str   = Input("N2O_PROPYLENE")
@@ -57,12 +60,17 @@ class Spaceplane(GeomBase):
     #: Maximum sub-tanks per propellant (1-4)
     max_tanks_per_propellant:  int   = Input(4,    validator=Positive())
 
+    # Individual Masses  ───────────────────────────────────
+    mass_landing_gear: float = Input(5.0, validator=Positive())
+    mass_avionics: float = Input(2.5, validator=Positive())
+    mass_tail: float = Input(3.0, validator=Positive())
+    mass_wings: float = Input(20.0, validator=Positive())
+
     # ── Tank structural / q_max inputs ───────────────────────────────────
     q_max:            float = Input(50e3,  validator=Positive())
     sigma_allow_tank: float = Input(345e6, validator=Positive())
     rho_wall:         float = Input(2840.0, validator=Positive())
     factor_of_safety: float = Input(1.5,   validator=Between(1.0, 3.0))
-    k_tank:           float = Input(0.10,  validator=Positive())
 
     # ─────────────────────── Wing ───────────────────────────────────
     airfoil_root_name: str = Input("whitcomb")
@@ -129,6 +137,34 @@ class Spaceplane(GeomBase):
         margin  = self.tanks_avionics_margin
         return nose_l + pay_l + avi_l + margin
 
+    preliminary_propulsion_bay_length: float = Input(1.20, validator=Positive())
+
+    @Attribute
+    def preliminary_fuselage(self):
+        return Fuselage(
+            label="Preliminary Fuselage",
+            cubesat_standard=self.cubesat_standard,
+            n_units_stacked=self.n_units_stacked,
+            clearance=self.payload_clearance,
+            avionics_box_length=self.avionics_box_length,
+            avionics_box_width=self.avionics_box_width,
+            avionics_box_height=self.avionics_box_height,
+            propulsion_bay_length=self.preliminary_propulsion_bay_length,
+            structural_wall_depth=self.structural_wall_depth,
+            min_inner_diameter=self.min_inner_diameter,
+            nose_fineness=self.nose_fineness,
+            tail_fineness=self.tail_fineness,
+            engine_exit_diameter=self.engine_exit_diameter,
+            n_nose_sects=self.n_nose_sects,
+            fuselage_material=self.fuselage_material,
+            skin_thickness=self.skin_thickness,
+            popup_warnings=self.popup_warnings,
+        )
+
+    @Attribute
+    def preliminary_fuselage_mass(self):
+        return self.preliminary_fuselage.fuselage_structural_mass
+
     # ── Propulsion Part ───────────────────────────────────────────────
 
     @Part
@@ -151,7 +187,12 @@ class Spaceplane(GeomBase):
             sigma_allow_tank=self.sigma_allow_tank,
             rho_wall=self.rho_wall,
             factor_of_safety=self.factor_of_safety,
-            k_tank=self.k_tank,
+            mass_payload=self.payload_mass,
+            mass_fuselage=self.preliminary_fuselage_mass,
+            mass_wings=self.mass_wings,
+            mass_landing_gear=self.mass_landing_gear,
+            mass_avionics=self.mass_avionics,
+            mass_tail=self.mass_tail,
             popup_warnings=self.popup_warnings,
         )
 
@@ -181,6 +222,10 @@ class Spaceplane(GeomBase):
             tail_fineness=self.tail_fineness,
             engine_exit_diameter=self.engine_exit_diameter,
             n_nose_sects=self.n_nose_sects,
+
+            fuselage_material=self.fuselage_material,
+            skin_thickness=self.skin_thickness,
+
             popup_warnings=self.popup_warnings,
         )
 
@@ -237,7 +282,7 @@ class Spaceplane(GeomBase):
                            airfoil_root_name="whitcomb",
                            airfoil_tip_name="whitcomb",
                            t_factor_root=0.9 * self.w_t_factor_root,
-                           t_factor_tip=0.7 * child.t_factor_root,
+                           t_factor_tip=0.7 * child.spact_factor_root,
                            semi_span=self.w_semi_span / 2.5,
                            sweep=self.w_sweep_tip * 1.2,
                            twist=0,
@@ -276,13 +321,17 @@ class Spaceplane(GeomBase):
             "payload_volume_m3":       round(f.payload_bay.required_volume, 5),
             "propulsion_type":         p.propulsion_type,
             "required_delta_v_m_s":    round(p.required_delta_v, 1),
-            "gross_mass_kg":           round(p.gross_mass, 1),
-            "propellant_mass_kg":      round(p.propellant_mass, 1),
             "thrust_N":                round(p.thrust, 1),
             "tank_system_length_m":    round(p.tank_system_length, 3),
             "max_tank_diameter_m":     round(p.max_tank_diameter, 3),
             "n_oxidizer_tanks":        p.oxidizer_stack.n_tanks,
             "n_fuel_tanks":            p.fuel_stack.n_tanks,
+            "wet_mass_kg":             round(p.wet_mass, 1),
+            "gross_mass_kg":           round(p.gross_mass, 1),
+            "dry_mass_kg":             round(p.dry_mass, 1),
+            "propellant_mass_kg":      round(p.propellant_mass, 1),
+            "fuel_mass_kg":            round(p.fuel_mass, 1),
+            "oxidizer_mass_kg":        round(p.oxidizer_mass, 1),
             "tank_wall_mass_kg":       round(p.tank_wall_mass, 3),
         }
 
@@ -312,7 +361,7 @@ if __name__ == "__main__":
         label="Suborbital Research Spaceplane",
 
         # Payload
-        cubesat_standard="6U",
+        cubesat_standard="12U",
         n_units_stacked=1,
         payload_clearance=0.030,
         payload_mass=4.0,
@@ -327,6 +376,8 @@ if __name__ == "__main__":
         min_inner_diameter=0.30,
         nose_fineness=1.8,
         tail_fineness=2.5,
+        fuselage_material="Al-6061-T6",
+        skin_thickness=0.002,
 
         # Propulsion
         propulsion_type="N2O_PROPYLENE",
@@ -335,7 +386,7 @@ if __name__ == "__main__":
         thrust_to_weight=1.5,
         tank_wall_thickness=0.003,
         intertank_spacing=0.050,
-        tank_diameter_fraction=0.40,
+        tank_diameter_fraction=0.850,
         tanks_avionics_margin=0.050,
         max_tank_ld=5.0,
         max_tanks_per_propellant=4,
@@ -345,7 +396,6 @@ if __name__ == "__main__":
         sigma_allow_tank=345e6,
         rho_wall=2840.0,
         factor_of_safety=1.5,
-        k_tank=0.10,
 
         # Wing
         w_semi_span=5,

@@ -16,10 +16,12 @@ def plot_mass_breakdown(vehicle):
     labels = [
         "Fuselage",
         "Wings",
+        "Tail",
         "Avionics",
         "Payload",
         "Tank walls",
         "Propellant",
+        "Landing gear",
     ]
 
     masses = [
