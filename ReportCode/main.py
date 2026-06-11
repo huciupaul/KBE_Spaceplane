@@ -36,7 +36,6 @@ class Spaceplane(GeomBase):
     avionics_box_height: float = Input(0.080, validator=Positive())
 
     # ── Fuselage structure ────────────────────────────────────────────
-    structural_wall_depth: float = Input(0.050, validator=Between(0.02, 0.15))
     min_inner_diameter:    float = Input(0.30)
     nose_fineness:         float = Input(1.8)
     tail_fineness:         float = Input(2.5)
@@ -44,7 +43,7 @@ class Spaceplane(GeomBase):
     n_nose_sects:          int   = Input(8)
     fuselage_material: str = Input("Al-6061-T6",
                                    validator=OneOf(list(FUSELAGE_MATERIALS.keys())))
-    skin_thickness: float = Input(0.002, validator=Positive())
+    skin_thickness: float = Input(0.003, validator=Positive())
 
     # ── Mission / propulsion ──────────────────────────────────────────
     propulsion_type:        str   = Input("N2O_PROPYLENE")
@@ -131,7 +130,7 @@ class Spaceplane(GeomBase):
         Tanks start position computed from inputs only (no circular dependency).
         = nose_length + payload_bay_length + avionics_length + margin
         """
-        outer_d = self.fuselage_inner_diameter + 2.0 * self.structural_wall_depth
+        outer_d = self.fuselage_inner_diameter + 2.0 * self.skin_thickness
         nose_l  = self.nose_fineness * outer_d
         pay_l   = self._payload_bay.required_longitudinal
         avi_l   = self.avionics_box_length
@@ -151,7 +150,6 @@ class Spaceplane(GeomBase):
             avionics_box_width=self.avionics_box_width,
             avionics_box_height=self.avionics_box_height,
             propulsion_bay_length=self.preliminary_propulsion_bay_length,
-            structural_wall_depth=self.structural_wall_depth,
             min_inner_diameter=self.min_inner_diameter,
             nose_fineness=self.nose_fineness,
             tail_fineness=self.tail_fineness,
@@ -217,7 +215,6 @@ class Spaceplane(GeomBase):
             avionics_box_height=self.avionics_box_height,
             propulsion_bay_length=(self.propulsion.tank_system_length
                                    + self.tanks_avionics_margin),
-            structural_wall_depth=self.structural_wall_depth,
             min_inner_diameter=self.min_inner_diameter,
             nose_fineness=self.nose_fineness,
             tail_fineness=self.tail_fineness,
@@ -364,7 +361,7 @@ if __name__ == "__main__":
         # Payload
         cubesat_standard="12U",
         n_units_stacked=1,
-        payload_clearance=0.030,
+        payload_clearance=0.050,
         payload_mass=10.0,
 
         # Avionics
@@ -373,7 +370,6 @@ if __name__ == "__main__":
         avionics_box_height=0.080,
 
         # Fuselage
-        structural_wall_depth=0.050,
         min_inner_diameter=0.30,
         nose_fineness=1.8,
         tail_fineness=2.5,

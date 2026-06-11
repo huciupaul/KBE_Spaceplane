@@ -14,7 +14,7 @@ Interior reference boxes (not structural):
 
 Part of Team 24 KBE Assignment - Spaceplane conceptual design tool.
 """
-
+from linecache import clearcache
 from math import pi, sqrt
 import math
 import numpy as np
@@ -263,7 +263,7 @@ class StandardPayloadBay(Base):
 
     @Attribute
     def required_diameter(self):
-        return sqrt(self.required_lateral ** 2 + self.required_vertical ** 2)
+        return sqrt(self.required_lateral ** 2 + self.required_vertical ** 2+ 2* self.clearance)
 
     @Attribute
     def required_volume(self):
@@ -332,7 +332,6 @@ class Fuselage(Base):
     skin_thickness: float = Input(0.002, validator=Positive())
 
     propulsion_bay_length: float = Input(1.20, validator=GreaterThan(0))
-    structural_wall_depth: float = Input(0.050, validator=Between(0.02, 0.15))
     min_inner_diameter:    float = Input(0.150)
     nose_fineness:         float = Input(1.8)
     tail_fineness:         float = Input(2.5)
@@ -371,7 +370,7 @@ class Fuselage(Base):
 
     @Attribute
     def outer_diameter(self):
-        return self.inner_diameter + 2.0 * self.structural_wall_depth
+        return self.inner_diameter + 2.0 * self.skin_thickness
 
     @Attribute
     def outer_radius(self):
@@ -714,7 +713,6 @@ if __name__ == "__main__":
         avionics_box_width=0.120,
         avionics_box_height=0.080,
         propulsion_bay_length=1.20,
-        structural_wall_depth=0.050,
         min_inner_diameter=0.100,
         nose_fineness=1.8,
         tail_fineness=1.3,
