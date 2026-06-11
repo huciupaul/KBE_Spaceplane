@@ -68,8 +68,8 @@ class Spaceplane(GeomBase):
 
     # ── Tank structural / q_max inputs ───────────────────────────────────
     q_max:            float = Input(50e3,  validator=Positive())
-    sigma_allow_tank: float = Input(345e6, validator=Positive())
-    rho_wall:         float = Input(2840.0, validator=Positive())
+    sigma_allow_tank: float = Input(276e6, validator=Positive())
+    rho_wall:         float = Input(2700.0, validator=Positive())
     factor_of_safety: float = Input(1.5,   validator=Between(1.0, 3.0))
 
     # ─────────────────────── Wing ───────────────────────────────────

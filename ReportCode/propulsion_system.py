@@ -546,16 +546,8 @@ class PropulsionSystem(Base):
     ULLAGE_SELF_PRESS    = 0.02
     ULLAGE_NON_SELFPRESS = 0.05
 
-    # Horizontal takeoff only
-    STRUCTURAL_FRACTION = 0.28
     TW_LO = 1.3
     TW_HI = 2.5
-
-
-
-    @Attribute
-    def structural_fraction(self):
-        return self.STRUCTURAL_FRACTION
 
     @Attribute
     def checked_thrust_to_weight(self):
@@ -939,7 +931,6 @@ class PropulsionSystem(Base):
             "isp_s":                    round(self.isp, 1),
             "mixture_ratio_OF":         round(self.mixture_ratio, 2),
             "required_delta_v_m_s":     round(self.required_delta_v, 1),
-            "structural_fraction":      round(self.structural_fraction, 3),
             "propellant_fraction":      round(self.checked_propellant_fraction, 3),
             "fuel_volume_L":            round(self.fuel_volume * 1e3, 3),
             "oxidizer_volume_L":        round(self.oxidizer_volume * 1e3, 3),
