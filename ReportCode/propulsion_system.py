@@ -615,14 +615,6 @@ class PropulsionSystem(Base):
 
     # ── Mass sizing (two-phase iterative) ─────────────────────────────
 
-    @Attribute
-    def mass_ratio(self):
-        return exp(self.required_delta_v / (self._G0 * self.isp))
-
-    @Attribute
-    def propellant_fraction(self):
-        return 1.0 - 1.0 / self.mass_ratio
-
     #: Science payload [kg]
     mass_payload: float = Input(4.0, validator=Positive())
     #: Fuselage shell (nose + barrel + boat-tail skins) [kg]
@@ -653,6 +645,7 @@ class PropulsionSystem(Base):
     @Attribute
     def mass_ratio(self):
         return exp(self.required_delta_v / (self._G0 * self.isp))
+
 
     @Attribute
     def _mass_solution(self):
@@ -914,13 +907,6 @@ class PropulsionSystem(Base):
             warnings.warn(msg)
         return pf
 
-    @Attribute
-    def checked_propellant_fraction(self):
-        pf = self.propellant_fraction
-        if pf > 0.65:
-            warnings.warn(f"Propellant fraction {pf:.3f} > 0.65 — heavy vehicle.")
-        return pf
-
     # ── Summary ───────────────────────────────────────────────────────
 
     @Attribute
@@ -931,7 +917,6 @@ class PropulsionSystem(Base):
             "isp_s":                    round(self.isp, 1),
             "mixture_ratio_OF":         round(self.mixture_ratio, 2),
             "required_delta_v_m_s":     round(self.required_delta_v, 1),
-            "propellant_fraction":      round(self.checked_propellant_fraction, 3),
             "fuel_volume_L":            round(self.fuel_volume * 1e3, 3),
             "oxidizer_volume_L":        round(self.oxidizer_volume * 1e3, 3),
             "n_oxidizer_tanks":         self.oxidizer_stack.n_tanks,
