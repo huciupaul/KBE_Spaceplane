@@ -6,7 +6,7 @@ Top-level integration module for the suborbital research spaceplane KBE applicat
 Sizing loop:
     PropulsionSystem.tank_system_length  →  Fuselage.propulsion_bay_length
 """
-from math import radians
+from math import radians, sqrt
 from mass_breakdown import plot_mass_breakdown
 from parapy.core import *
 from parapy.core.validate import *
@@ -16,11 +16,16 @@ from parapy.geom import (GeomBase, translate, rotate, ProjectedCurve,
 
 from fuselage import Fuselage, StandardPayloadBay, CUBESAT_STANDARDS, FUSELAGE_MATERIALS
 from propulsion_system import PropulsionSystem
-from wing import Wing
+#from wing import Wing
 from tail import TailSection
 from ref_frame import Frame
+from wing_v2 import Wing
+from kbeutils import avl
 
 
+
+def calc_span(area, aspect_ratio):
+    return sqrt(area * aspect_ratio)
 
 class Spaceplane(GeomBase):
     """Root assembly for the suborbital research spaceplane."""
@@ -73,7 +78,7 @@ class Spaceplane(GeomBase):
     factor_of_safety: float = Input(1.5,   validator=Between(1.0, 3.0))
 
     # ─────────────────────── Wing ───────────────────────────────────
-    airfoil_root_name: str = Input("whitcomb")
+    '''airfoil_root_name: str = Input("whitcomb")
     airfoil_kink_name: str = Input("whitcomb")
     airfoil_tip_name: str = Input("whitcomb")
     w_c_root: float = Input()
@@ -92,16 +97,33 @@ class Spaceplane(GeomBase):
     w_dihedral: float = Input(0)
 
     w_pos_rel_x: float = Input(0.4) # wing root LE position as fraction of fuselage length
-    w_pos_rel_z: float = Input(0.8) # wing root LE position as fraction of fuselage radius, vertically
+    w_pos_rel_z: float = Input(0.8) # wing root LE position as fraction of fuselage radius, vertically'''
+
+    wing_location: float = Input()  # longitudinal wing location, as % of fuselage length
+    wing_area: float = Input()  # planform area of the total wing (right + left wing)
+    wing_aspect_ratio: float = Input()  # square root (wing span**2/ wing area)
+    wing_taper_ratio: float = Input()  # chord_tip / chord_root
+    wing_le_sweep: float = Input()  # sweep angle measured at leading edge, in degrees
+    wing_twist: float = Input()
+    wing_airfoil_name: str = Input()  # Name of the NACA airfoil (4 or 5 digits according to designation)
+    elevator_hinge: float = Input()  # Chordwise location of the elevator hinge
 
     # ─────────────────────Tail sections ───────────────────────────────────
 
-    vt_long: float = Input(0.8) # VT root LE position as fraction of fuselage length
+    '''vt_long: float = Input(0.8) # VT root LE position as fraction of fuselage length
     vt_taper: float = Input(0.4)
-    vt_chord_perc: float = Input(0.75)
+    vt_chord_perc: float = Input(0.75)'''
 
+    tail_area: float = Input()
+    tail_aspect_ratio: float = Input()
+    tail_taper_ratio: float = Input()
+    tail_airfoil_name: str = Input()
+    rudder_hinge: float = Input()
 
+    # ─────────────────────AVL inputs ───────────────────────────────────
 
+    cl_cr: float = Input()  # cruise lift coefficient
+    mach_cr: float = Input()  # Cruise Mach number (used for AVL analysis)
 
     mesh_deflection: float = Input(1e-4)
     popup_warnings: bool = Input(False)
@@ -227,7 +249,7 @@ class Spaceplane(GeomBase):
             popup_warnings=self.popup_warnings,
         )
 
-    # ── Wing Part ─────────────────────────────────────────────────
+    ''''# ── Wing Part ─────────────────────────────────────────────────
 
     @Part
     def aircraft_frame(self):
@@ -269,7 +291,7 @@ class Spaceplane(GeomBase):
                            twist=0,
                            position=rotate(translate(self.position,
                                                      "x", self.vt_long * self.fuselage.total_length,
-                                                     "z", self.fuselage.outer_diameter/2 * 0.7),
+                                                     "z", 0),
                                            "x", radians(90)),
                            mesh_deflection=self.mesh_deflection)
 
@@ -280,7 +302,7 @@ class Spaceplane(GeomBase):
                            airfoil_root_name="whitcomb",
                            airfoil_tip_name="whitcomb",
                            t_factor_root=0.9 * self.w_t_factor_root,
-                           t_factor_tip=0.7 * child.spact_factor_root,
+                           t_factor_tip=0.7 * self.w_t_factor_root,
                            semi_span=self.w_semi_span / 2.5,
                            sweep=self.w_sweep_tip * 1.2,
                            twist=0,
@@ -296,7 +318,129 @@ class Spaceplane(GeomBase):
                              # Two vectors and a point to define the mirror plane
                              vector1=self.position.Vz,
                              vector2=self.position.Vx,
-                             mesh_deflection=self.mesh_deflection)
+                             mesh_deflection=self.mesh_deflection)'''
+
+    # ────────────────────────────── Wing + vt ───────────────────────────────────
+
+    @Attribute
+    def tail_le_sweep(self):
+        return self.wing_le_sweep + 5  # engineering rule: to allow the tail a higher critical mach than for the wing
+
+    @Attribute
+    def wing_position(self):  # wing reference system. Same orientation as fuselage's, but with origin on wing LE @ root
+        return self.position.translate('x', self.fuselage.total_length * self.wing_location,
+                                       'z', -self.fuselage.outer_diameter/4)
+
+    @Part
+    def wing(self):
+        return Wing(name="wing",
+                    span=calc_span(self.wing_area, self.wing_aspect_ratio),  # call to function calc_span
+                    # span=sqrt(self.wing_area * self.wing_aspect_ratio), # worse alternative to the use of the function
+                    aspect_ratio=self.wing_aspect_ratio,
+                    taper_ratio=self.wing_taper_ratio,
+                    le_sweep=self.wing_le_sweep,
+                    twist=self.wing_twist,
+                    airfoil_name=self.wing_airfoil_name,
+                    control_name='elevator',
+                    control_hinge_loc=self.elevator_hinge,
+                    duplicate_sign=1,
+                    position=self.wing_position)
+
+    @Attribute
+    def tail_position(self):
+        return rotate(translate(self.position,
+                                "x", self.fuselage.total_length - self.tail.chord_root,
+                                "z", 0),
+                                "x", radians(90))
+
+    @Part
+    def tail(self):
+        return Wing(name="tail",
+                    span=calc_span(self.tail_area, self.tail_aspect_ratio),
+                    aspect_ratio=self.tail_aspect_ratio,
+                    taper_ratio=self.tail_taper_ratio,
+                    le_sweep=self.tail_le_sweep,
+                    twist=0,
+                    airfoil_name=self.tail_airfoil_name,
+                    control_name='rudder',
+                    control_hinge_loc=self.rudder_hinge,
+                    is_mirrored=False,
+                    position=self.tail_position
+                    )
+
+    # ── AVL ───────────────────────────────────────────────────────
+
+    @Attribute(in_tree=True)
+    def avl_surfaces(self):  # a list of all AVL surfaces in the aircraft:
+        return self.find_children(lambda o: isinstance(o, avl.Surface))
+        # This automatically scans the product tree and collects all
+        # instances of the avl.Surface class.
+        # (if you don't know what `lambda` is doing there: that's a somewhat
+        # more advanced feature of functional programming, but it's not
+        # required knowledge for this course. Just use it as provided above,
+        # and you'll be fine. Feel free to check out the
+        # Python documentation about it, though, if you're curious.)
+
+        # Otherwise, you can of course also manually specify the surfaces you
+        # want to include, like this:
+        # return [self.wing.avl_surface, self.tail.avl_surface]
+        # (but make sure you forget no surface that needs to be included in the
+        # model!)
+
+    @Part
+    def avl_configuration(self):
+        """Configurations are made separately for each Mach number that is provided."""
+        return avl.Configuration(name='cruise analysis',
+                                 reference_area=self.wing.planform_area,
+                                 reference_span=self.wing.span,
+                                 reference_chord=self.wing.mac,
+                                 reference_point=self.position.point,
+                                 surfaces=self.avl_surfaces,
+                                 mach=self.mach_cr)
+
+    @Attribute
+    def avl_settings(self):
+        """
+        Format for AVL inputs:
+            dict(<parameter to define>: <value>)
+            value can be defined either by a number or with `avl.Parameter`:
+            avl.Parameter(name=<var to adjust>,
+                          setting=<var for which to achieve a given value>
+                          value=<value to achieve>)
+        These need to be defined either in Input or in a separate Attribute, in
+        order to allow ParaPy to trace dependencies (defining this dictionary
+        in an argument for avl.Interface() or avl.Case fails for that reason)
+        """
+        return {'alpha': avl.Parameter(name='alpha',
+                                       setting='CL',
+                                       value=self.cl_cr)}
+
+    @Part
+    def avl_case(self):
+        """avl case definition using the avl_settings dictionary defined above"""
+        return avl.Case(name='fixed_cl',  # name _must_ correspond to type of case
+                        settings=self.avl_settings)
+
+    @Part
+    def avl_analysis(self):
+        return avl.Interface(configuration=self.avl_configuration,
+                             # note: AVL always expects a list of cases!
+                             cases=[self.avl_case])
+
+    @Attribute
+    def l_over_d(self):
+        """process AVL results and compute L/D"""
+        # Since AVL always receives a list of cases, but produces a dictionary of
+        # results (using the name supplied to avl.Case as key)
+        # each result is itself a nested dictionary, containing a lot of
+        # information so it's a good idea to extract the relevant numbers
+        # as @Attributes
+        return {result['Name']: result['Totals']['CLtot'] / result['Totals']['CDtot']
+                for case_name, result in self.avl_analysis.results.items()}
+        # The above is a bit more complicated than needed since there's only
+        # a single case name etc., but addressing it "by name" means we'd need
+        # to update the definition above every time we change something in the
+        # analysis.
 
     # ── Summary ───────────────────────────────────────────────────────
 
@@ -395,23 +539,42 @@ if __name__ == "__main__":
         factor_of_safety=1.5,
 
         # Wing
-        w_semi_span=5,
-        w_kink_span=2,
-        w_sweep_kink=20,
-        w_sweep_tip=25,
-        w_twist=0,
-        w_dihedral=4,
-        w_c_root=1.5,
-        w_c_kink=1,
-        w_c_tip=0.5,
-        w_t_factor_root=1,
-        w_t_factor_kink=0.75,
-        w_t_factor_tip=0.5,
-        airfoil_root_name='whitcomb',
-        airfoil_kink_name='whitcomb',
-        airfoil_tip_name='whitcomb',
-        mesh_deflection=1e-5,
+        # w_semi_span=5,
+        # w_kink_span=2,
+        # w_sweep_kink=20,
+        # w_sweep_tip=25,
+        # w_twist=0,
+        # w_dihedral=4,
+        # w_c_root=1.5,
+        # w_c_kink=1,
+        # w_c_tip=0.5,
+        # w_t_factor_root=1,
+        # w_t_factor_kink=0.75,
+        # w_t_factor_tip=0.5,
+        # airfoil_root_name='whitcomb',
+        # airfoil_kink_name='whitcomb',
+        # airfoil_tip_name='whitcomb',
+        # mesh_deflection=1e-5,
         #position=XOY.rotate(x=0.7).translate(x=5, y=10)
+
+        # Wing
+        wing_location=0.5,
+        wing_area=10,
+        wing_aspect_ratio=2.5,
+        wing_taper_ratio=0.2,
+        wing_le_sweep=46,
+        wing_twist=-5,
+        wing_airfoil_name='23008',
+        elevator_hinge=0.8,
+        # Tail
+        tail_area=2,
+        tail_aspect_ratio=2,
+        tail_taper_ratio=0.2,
+        tail_airfoil_name='0010',
+        rudder_hinge=0.6,
+        # AVL
+        mach_cr=0.3,
+        cl_cr=0.4
     )
 
     vehicle.print_summary()
