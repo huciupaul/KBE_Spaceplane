@@ -49,8 +49,8 @@ class Spaceplane(GeomBase):
     propulsion_type:        str   = Input("N2O_PROPYLENE")
     payload_mass:           float = Input(4.0,   validator=Positive())
     target_apogee:          float = Input(100e3, validator=Positive())
-    max_burnout_mach:       float = Input(3.5,   validator=Between(1.0, 5.0))
-    thrust_to_weight:       float = Input(1.5,   validator=Between(1.3, 6.0))
+    max_burnout_mach:       float = Input(1.0,   validator=Between(0.9, 3.5))
+    thrust_to_weight:       float = Input(1.0,   validator=Between(0.6, 1.2))
     tank_wall_thickness:    float = Input(0.003, validator=Positive())
     intertank_spacing:      float = Input(0.050, validator=Positive(incl_zero=True))
     tank_diameter_fraction:    float = Input(0.40,  validator=Between(0.10, 0.90))
@@ -379,8 +379,8 @@ if __name__ == "__main__":
         # Propulsion
         propulsion_type="N2O_PROPYLENE",
         target_apogee=100e3,
-        max_burnout_mach=3.5,
-        thrust_to_weight=1.5,
+        max_burnout_mach=3.4,
+        thrust_to_weight=0.9,
         tank_wall_thickness=0.003,
         intertank_spacing=0.050,
         tank_diameter_fraction=0.850,

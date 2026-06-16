@@ -510,8 +510,8 @@ class PropulsionSystem(Base):
         "N2O_PROPYLENE", validator=OneOf(list(PROPELLANT_DB.keys())))
     payload_mass:       float = Input(4.0,   validator=Positive())
     target_apogee:      float = Input(100e3, validator=Positive())
-    max_burnout_mach:   float = Input(3.5,   validator=Between(1.0, 5.0))
-    thrust_to_weight:   float = Input(1.5,   validator=Between(1.3, 2.5))
+    max_burnout_mach:   float = Input(1.2,   validator=Between(0.9, 3.5))
+    thrust_to_weight:   float = Input(1.0,   validator=Between(0.6, 1.2))
 
     # ── Tank geometry ─────────────────────────────────────────────────
     max_tank_diameter:       float = Input(0.20,  validator=Positive())
@@ -546,8 +546,10 @@ class PropulsionSystem(Base):
     ULLAGE_SELF_PRESS    = 0.02
     ULLAGE_NON_SELFPRESS = 0.05
 
+
     TW_LO = 1.3
     TW_HI = 2.5
+
 
     @Attribute
     def checked_thrust_to_weight(self):
@@ -615,6 +617,14 @@ class PropulsionSystem(Base):
 
     # ── Mass sizing (two-phase iterative) ─────────────────────────────
 
+    @Attribute
+    def mass_ratio(self):
+        return exp(self.required_delta_v / (self._G0 * self.isp))
+
+    @Attribute
+    def propellant_fraction(self):
+        return 1.0 - 1.0 / self.mass_ratio
+
     #: Science payload [kg]
     mass_payload: float = Input(4.0, validator=Positive())
     #: Fuselage shell (nose + barrel + boat-tail skins) [kg]
@@ -645,7 +655,6 @@ class PropulsionSystem(Base):
     @Attribute
     def mass_ratio(self):
         return exp(self.required_delta_v / (self._G0 * self.isp))
-
 
     @Attribute
     def _mass_solution(self):
@@ -907,6 +916,13 @@ class PropulsionSystem(Base):
             warnings.warn(msg)
         return pf
 
+    @Attribute
+    def checked_propellant_fraction(self):
+        pf = self.propellant_fraction
+        if pf > 0.65:
+            warnings.warn(f"Propellant fraction {pf:.3f} > 0.65 — heavy vehicle.")
+        return pf
+
     # ── Summary ───────────────────────────────────────────────────────
 
     @Attribute
@@ -917,6 +933,7 @@ class PropulsionSystem(Base):
             "isp_s":                    round(self.isp, 1),
             "mixture_ratio_OF":         round(self.mixture_ratio, 2),
             "required_delta_v_m_s":     round(self.required_delta_v, 1),
+            "propellant_fraction":      round(self.checked_propellant_fraction, 3),
             "fuel_volume_L":            round(self.fuel_volume * 1e3, 3),
             "oxidizer_volume_L":        round(self.oxidizer_volume * 1e3, 3),
             "n_oxidizer_tanks":         self.oxidizer_stack.n_tanks,
@@ -946,8 +963,8 @@ if __name__ == "__main__":
         propulsion_type="N2O_PROPYLENE",
         payload_mass=15,
         target_apogee=100e3,
-        max_burnout_mach=3.5,
-        thrust_to_weight=1.5,
+        max_burnout_mach=3.4,
+        thrust_to_weight=1.0,
         max_tank_diameter=0.120,
         fuselage_inner_diameter=0.300,
         tank_wall_thickness=0.003,
